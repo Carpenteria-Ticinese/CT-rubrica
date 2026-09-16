@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CT Rubrica — Carpenteria Ticinese</title>
+  <!-- ?v= : forza il browser a riprendere CSS/JS aggiornati. index.html non ha
+       versione: dopo ogni caricamento si apre con Ctrl+F5. -->
+  <link rel="stylesheet" href="css/style.css?v=1" />
+</head>
+<body data-versione="1">
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LOGIN — Supabase Auth, gli stessi account di Pre-contabilità
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<section id="pagina-login" class="pagina" hidden>
+  <div class="login-card">
+    <div class="login-logo">📇 <strong>CT Rubrica</strong><span>Carpenteria Ticinese</span></div>
+    <form id="login-form" onsubmit="return login(event)" autocomplete="on">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" autocomplete="username" required
+             placeholder="nome@esempio.ch" />
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required />
+      <button id="login-btn" type="submit" class="btn-primary btn-largo">Entra</button>
+      <div id="login-banner" class="banner-area" aria-live="polite"></div>
+      <p class="login-nota">Si entra con gli stessi email e password di Pre-contabilità.</p>
+    </form>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     APP
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<section id="pagina-app" class="pagina" hidden>
+
+  <header id="topbar">
+    <button type="button" class="topbar-logo" onclick="mostraVista('lista')" title="Torna all'elenco">
+      📇 <strong>CT Rubrica</strong>
+    </button>
+    <div class="topbar-utente">
+      <span id="topbar-email" class="dim"></span>
+      <button type="button" class="btn-secondary btn-piccolo" onclick="logout()">Esci</button>
+    </div>
+  </header>
+
+  <main id="contenuto">
+
+    <!-- Avviso generale (errori di caricamento, esito salvataggi, ecc.) -->
+    <div id="banner-globale" class="banner-area" aria-live="polite"></div>
+
+    <!-- ─── VISTA 1: ELENCO ───────────────────────────────────────────────── -->
+    <div id="vista-lista" class="vista">
+
+      <div class="barra-ricerca">
+        <div class="campo-ricerca">
+          <span class="lente" aria-hidden="true">🔍</span>
+          <input id="ricerca" type="search" placeholder="Cerca per nome o ragione sociale…"
+                 oninput="onRicerca()" autocomplete="off" />
+          <button type="button" id="ricerca-pulisci" class="pulisci" onclick="pulisciRicerca()"
+                  aria-label="Cancella ricerca" hidden>✕</button>
+        </div>
+        <button type="button" class="btn-primary" onclick="nuovoContatto()">＋ Nuovo contatto</button>
+      </div>
+
+      <!-- Le categorie come pulsanti. Un contatto compare in ogni categoria che
+           ha spuntata: sono filtri, non cassetti. -->
+      <div id="filtri-categorie" class="filtri" role="tablist" aria-label="Filtra per categoria"></div>
+
+      <div id="lista-intestazione" class="lista-intestazione dim"></div>
+      <div id="lista-contatti" class="lista"></div>
+    </div>
+
+    <!-- ─── VISTA 2: SCHEDA IN LETTURA ────────────────────────────────────── -->
+    <div id="vista-scheda" class="vista" hidden>
+      <div class="vista-azioni">
+        <button type="button" class="btn-secondary" onclick="mostraVista('lista')">← Elenco</button>
+        <div class="spazio"></div>
+        <button type="button" class="btn-primary" onclick="modificaContattoCorrente()">✏️ Modifica</button>
+        <button type="button" class="btn-danger" id="scheda-elimina-btn" onclick="chiediElimina()">🗑️ Elimina</button>
+      </div>
+      <div id="scheda-banner" class="banner-area" aria-live="polite"></div>
+      <div id="scheda-contenuto" class="card"></div>
+    </div>
+
+    <!-- ─── VISTA 3: MODULO (nuovo / modifica) ────────────────────────────── -->
+    <div id="vista-modulo" class="vista" hidden>
+      <form id="modulo-contatto" onsubmit="return salvaContatto(event)" novalidate>
+
+        <div class="vista-azioni">
+          <button type="button" class="btn-secondary" onclick="annullaModulo()">← Annulla</button>
+          <div class="spazio"></div>
+          <h2 id="modulo-titolo" class="modulo-titolo">Nuovo contatto</h2>
+        </div>
+
+        <div id="modulo-banner" class="banner-area" aria-live="polite"></div>
+
+        <div class="card">
+
+          <!-- Foto + identità -->
+          <div class="blocco-foto">
+            <div class="foto-anteprima" id="foto-anteprima"></div>
+            <div class="foto-comandi">
+              <label class="btn-secondary btn-file" for="c-foto">📷 Scegli foto</label>
+              <input id="c-foto" type="file" accept="image/*" onchange="onFotoScelta(this)" hidden />
+              <button type="button" class="btn-secondary" id="c-foto-rimuovi" onclick="rimuoviFoto()" hidden>
+                ✕ Togli foto
+              </button>
+              <div class="form-hint">Viene ridotta a 800 px prima del caricamento.</div>
+            </div>
+          </div>
+
+          <h3 class="sezione">Chi è</h3>
+          <div class="griglia">
+            <div class="campo campo-largo">
+              <label for="c-ragione">Ragione sociale <span class="dim">(ditta, studio, ente)</span></label>
+              <input id="c-ragione" type="text" maxlength="200" oninput="aggiornaAnteprimaNome()" />
+            </div>
+            <div class="campo">
+              <label for="c-nome">Nome</label>
+              <input id="c-nome" type="text" maxlength="100" oninput="aggiornaAnteprimaNome()" />
+            </div>
+            <div class="campo">
+              <label for="c-cognome">Cognome</label>
+              <input id="c-cognome" type="text" maxlength="100" oninput="aggiornaAnteprimaNome()" />
+            </div>
+            <div class="campo campo-largo">
+              <label for="c-referente">Referente <span class="dim">(la persona di riferimento, se è un'azienda o uno studio)</span></label>
+              <input id="c-referente" type="text" maxlength="200" />
+            </div>
+          </div>
+
+          <h3 class="sezione">Categorie <span class="dim">(anche più di una)</span></h3>
+          <div id="c-categorie" class="categorie-check"></div>
+
+          <h3 class="sezione">Indirizzo</h3>
+          <div class="griglia">
+            <div class="campo campo-largo">
+              <label for="c-indirizzo">Via e numero</label>
+              <input id="c-indirizzo" type="text" maxlength="200" />
+            </div>
+            <div class="campo campo-stretto">
+              <label for="c-cap">CAP</label>
+              <input id="c-cap" type="text" maxlength="12" inputmode="numeric" />
+            </div>
+            <div class="campo">
+              <label for="c-citta">Città</label>
+              <input id="c-citta" type="text" maxlength="100" />
+            </div>
+            <div class="campo">
+              <!-- Il paese SI SCEGLIE, non si scrive: nel database va il codice
+                   ISO a due lettere. «Svizzera» digitato a mano diventava «SV»
+                   = El Salvador. Qui non può succedere. -->
+              <label for="c-paese">Paese</label>
+              <select id="c-paese"></select>
+            </div>
+          </div>
+
+          <h3 class="sezione">Recapiti</h3>
+          <div class="griglia">
+            <div class="campo">
+              <label for="c-telefono">Telefono <span class="dim">(fisso)</span></label>
+              <div class="campo-con-azione">
+                <input id="c-telefono" type="tel" maxlength="40" oninput="aggiornaLinkRecapiti()" />
+                <a id="c-telefono-link" class="btn-secondary btn-icona" href="#" hidden title="Chiama">📞</a>
+              </div>
+            </div>
+            <div class="campo" id="c-cellulare-campo">
+              <label for="c-cellulare">Cellulare</label>
+              <div class="campo-con-azione">
+                <input id="c-cellulare" type="tel" maxlength="40" oninput="aggiornaLinkRecapiti()" />
+                <a id="c-cellulare-link" class="btn-secondary btn-icona" href="#" hidden title="Chiama">📱</a>
+              </div>
+            </div>
+            <div class="campo">
+              <label for="c-email">Email</label>
+              <input id="c-email" type="email" maxlength="200" />
+            </div>
+            <div class="campo">
+              <label for="c-sito">Sito web</label>
+              <input id="c-sito" type="text" maxlength="200" placeholder="www.esempio.ch" />
+            </div>
+          </div>
+
+          <h3 class="sezione">Dati amministrativi</h3>
+          <div class="griglia">
+            <div class="campo">
+              <label for="c-uid">UID / Partita IVA</label>
+              <input id="c-uid" type="text" maxlength="40" placeholder="CHE-123.456.789" />
+            </div>
+            <div class="campo">
+              <label for="c-iban">IBAN</label>
+              <input id="c-iban" type="text" maxlength="40" placeholder="CH00 0000 0000 0000 0000 0" />
+            </div>
+            <div class="campo campo-stretto">
+              <label for="c-giorni">Giorni di pagamento</label>
+              <input id="c-giorni" type="number" min="0" max="365" step="1" inputmode="numeric" />
+            </div>
+          </div>
+
+          <h3 class="sezione">Note</h3>
+          <div class="campo">
+            <textarea id="c-note" rows="4" maxlength="4000"></textarea>
+          </div>
+
+          <div class="campo campo-attivo" id="c-attivo-riga" hidden>
+            <label class="check">
+              <input id="c-attivo" type="checkbox" checked />
+              <span>Contatto attivo <span class="dim">(senza spunta è archiviato: sparisce dagli elenchi, resta nei dati)</span></span>
+            </label>
+          </div>
+
+          <div class="modulo-piede">
+            <button type="submit" id="modulo-salva-btn" class="btn-primary btn-largo">💾 Salva contatto</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+  </main>
+
+  <footer id="piede" class="dim">CT Rubrica · versione <span id="piede-versione"></span></footer>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/app.js?v=1"></script>
+</body>
+</html>

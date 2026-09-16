@@ -1,0 +1,14 @@
+Repo: Carpenteria-Ticinese/CT-rubrica
+
+File del programma (percorso nel repo = percorso in questa cartella):
+index.html
+css/style.css
+js/app.js
+
+Documentazione e SQL (utili nel repo, non servono al programma per girare):
+LEGGIMI.md
+DA_CARICARE_SU_GITHUB.txt
+sql/da_applicare/SQL_RUBRICA_00_colonne.sql
+sql/da_applicare/SQL_RUBRICA_01_storage.sql
+
+Dopo il caricamento: aprire la pagina con Ctrl+F5.
