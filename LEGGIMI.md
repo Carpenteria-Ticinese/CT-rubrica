@@ -1,3 +1,4 @@
+[LEGGIMI.md](https://github.com/user-attachments/files/33421648/LEGGIMI.md)
 # CT Rubrica — leggimi
 
 Rubrica contatti di Carpenteria Ticinese. HTML/JS vanilla + Supabase, **stesso progetto
@@ -30,10 +31,16 @@ L'SQL non lo esegue il programma: Supabase → SQL Editor → incolla → Run.
 
 ## Come funziona, in breve
 
-- **Elenco**: ricerca in tempo reale su nome, cognome, ragione sociale e referente. I sette
-  filtri (Fornitori, Collaboratori, Preventivi, Appalti presi, Appalti conclusi, Marketing e
-  servizi, Altro) sono pulsanti: un contatto compare in **ogni** categoria che ha spuntata.
+- **Elenco**: ricerca in tempo reale su nome, cognome, ragione sociale e referente, contatti
+  divisi per lettera (A, B, C…). I filtri sono le categorie attive di `rubrica_categorie`
+  (vedi sotto): un contatto compare in **ogni** categoria che ha spuntata. Sul telefono i
+  filtri scorrono di lato e il «nuovo contatto» è il pulsante tondo in basso a destra.
   Il filtro «Archiviati» compare solo se ce ne sono.
+- **Scheda**: sotto il nome le azioni rapide (Cellulare, Chiama, WhatsApp, Email, Mappa).
+  WhatsApp usa il cellulare: un numero senza prefisso prende quello del paese del contatto
+  (CH, IT, DE, FR, AT, LI); per altri paesi il pulsante non compare. UID e IBAN si copiano con
+  un tocco. Su uno schermo largo almeno 1024 px la scheda si apre accanto all'elenco.
+- **Tema**: chiaro o scuro, segue l'impostazione del telefono.
 - **Telefono e cellulare** hanno un pulsante `tel:` accanto, sia in elenco sia nella scheda.
 - **Paese**: SOLO tendina, nel database va il codice ISO a due lettere (`CH`, `IT`, …). In
   Pre-contabilità era testo libero e «Svizzera» digitato a mano diventava `SV` = El Salvador.
@@ -46,6 +53,26 @@ L'SQL non lo esegue il programma: Supabase → SQL Editor → incolla → Run.
 - **Eliminazione**: pulsante «Elimina» nella scheda, una conferma inline («Sì, elimina») e via.
   Se il contatto è collegato a fatture o movimenti in Pre-contabilità il database rifiuta
   (vincolo di chiave esterna): allora si propone di **archiviarlo**, come fa Pre-contabilità.
+
+## Le categorie: tabella `rubrica_categorie`
+
+Colonne `id`, `azienda_id`, `nome`, `ordine`, `attiva`. Il programma legge tutte le righe
+dell'azienda, ordinate per `ordine`; spunte e filtri mostrano solo quelle con `attiva = true`.
+In `tm_contatti.categorie` finisce l'**`id`**, mai il nome.
+
+Dal pulsante **Categorie** (icona etichetta in alto) si apre «Gestisci categorie»:
+
+- **Rinominare**: si cambia il nome dove sta e si preme «Salva nome» (o Invio; Esc annulla).
+  Cambia solo `nome`: i contatti già taggati restano agganciati e mostrano subito il nome nuovo.
+- **Aggiungere**: l'`id` si ricava dal nome («Geometri» → `geometri`, «Appalti presi» →
+  `appalti_presi`) e non cambia più. Se l'id esiste già, anche disattivato, il programma avvisa
+  e non sovrascrive niente.
+- **Disattivare**: `attiva = false`. La categoria sparisce da spunte e filtri, ma i contatti che
+  ce l'hanno la conservano: nella scheda compare tratteggiata, nel modulo resta spuntata con
+  «(disattivata)», e salvando non si perde. «Riattiva» la rimette. **Nessuna riga si cancella.**
+
+Il colore di ogni categoria non sta nella tabella: le categorie di partenza hanno colori
+scelti, le nuove lo ricavano dall'id (sempre lo stesso).
 
 ## La categoria vecchia di Pre-contabilità
 
