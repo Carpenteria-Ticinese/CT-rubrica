@@ -12,25 +12,110 @@
 const SUPABASE_URL = 'https://wgidgbauhivdctdxfjnk.supabase.co'
 const SUPABASE_KEY = 'sb_publishable_Ke7MTQGHPYVXvKInfOrUQQ_Ys6qKJvD'
 const BUCKET_FOTO  = 'rubrica-foto'
-const APP_VERSIONE = 1
+const APP_VERSIONE = 2
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
 
-// ─── Le sette categorie ──────────────────────────────────────────────────────
-// Nel database stanno in tm_contatti.categorie (text[]) con la chiave `k`.
-// Un contatto ne può avere più di una: compare in ogni filtro che ha spuntato.
-var CATEGORIE = [
-  { k: 'fornitori',         n: 'Fornitori',           i: '🏭' },
-  { k: 'collaboratori',     n: 'Collaboratori',       i: '🤝' },
-  { k: 'preventivi',        n: 'Preventivi',          i: '📝' },
-  { k: 'appalti_presi',     n: 'Appalti presi',       i: '🏗️' },
-  { k: 'appalti_conclusi',  n: 'Appalti conclusi',    i: '✅' },
-  { k: 'marketing_servizi', n: 'Marketing e servizi', i: '📣' },
-  { k: 'altro',             n: 'Altro',               i: '📁' }
-]
+// ─── Le categorie ────────────────────────────────────────────────────────────
+// Stanno nella tabella rubrica_categorie (id, azienda_id, nome, ordine, attiva).
+// L'id è la chiave che finisce in tm_contatti.categorie (text[]) e NON cambia
+// mai: rinominare tocca solo `nome`, così i contatti già taggati restano
+// agganciati. Disattivare (attiva = false) toglie la categoria dalle spunte e
+// dai filtri, ma chi ce l'ha la conserva e la vede col suo nome. Le righe non
+// si cancellano mai. Un contatto ne può avere più di una: compare in ogni
+// filtro che ha spuntato.
+var CATEGORIE = []   // tutte le righe dell'azienda, anche le disattivate, per `ordine`
+var categorieErrore = null   // testo dell'errore se rubrica_categorie non si legge
 
+// Ogni categoria ha un colore (tinta HSL): la tabella non lo ha, quindi le
+// categorie di partenza hanno tinte scelte perché si distinguano bene, le
+// altre la ricavano dall'id (sempre la stessa per la stessa categoria). Il CSS
+// decide quanto chiara o scura, a seconda del tema del telefono.
+var TINTE_CATEGORIE = {
+  fornitori: 24, collaboratori: 212, preventivi: 266, appalti_presi: 150,
+  appalti_conclusi: 182, marketing_servizi: 330, tecnici: 44, altro: -1
+}
+
+function tintaDaTesto(s) {
+  var h = 0
+  s = String(s || '')
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return h % 360
+}
+
+// Lo stile inline con tinta e saturazione; -1 = grigio.
+function stileTinta(h) {
+  return h < 0 ? '--h:220;--s:8%' : '--h:' + h + ';--s:62%'
+}
+
+function rigaCategoria(r) {
+  var h = r.id in TINTE_CATEGORIE ? TINTE_CATEGORIE[r.id] : tintaDaTesto(r.id)
+  return { k: r.id, n: r.nome || r.id, stile: stileTinta(h), ordine: r.ordine, attiva: r.attiva !== false }
+}
+
+function ordinaCategorie() {
+  CATEGORIE.sort(function (a, b) {
+    var oa = a.ordine == null ? Infinity : a.ordine, ob = b.ordine == null ? Infinity : b.ordine
+    if (oa !== ob) return oa < ob ? -1 : 1
+    return a.n.localeCompare(b.n, 'it', { sensitivity: 'base' })
+  })
+}
+
+// Quelle che si offrono: spunte del modulo e pulsanti-filtro.
+function categorieAttive() {
+  return CATEGORIE.filter(function (c) { return c.attiva })
+}
+
+// Una chiave che non è (più) in tabella si mostra com'è: meglio l'id che niente.
 function categoriaInfo(k) {
-  return CATEGORIE.filter(function (c) { return c.k === k })[0] || { k: k, n: k, i: '🏷️' }
+  return CATEGORIE.filter(function (c) { return c.k === k })[0] ||
+         { k: k, n: k, stile: stileTinta(-1), attiva: false }
+}
+
+// ─── Icone ───────────────────────────────────────────────────────────────────
+// Disegni a tratto (stile Lucide, licenza ISC), uguali su iPhone, Samsung e PC:
+// le emoji cambiano aspetto da un telefono all'altro. Nell'HTML si scrive
+// <i data-ico="nome"></i> e riempiIcone() ci mette il disegno.
+var ICONE = {
+  telefono:  '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  cellulare: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>',
+  messaggio: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  email:     '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  mappa:     '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  sito:      '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  cerca:     '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  piu:       '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  indietro:  '<path d="m15 18-6-6 6-6"/>',
+  avanti:    '<path d="m9 18 6-6-6-6"/>',
+  modifica:  '<path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>',
+  elimina:   '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  tag:       '<path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1.2"/>',
+  esci:      '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  copia:     '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  persona:   '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  documento: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  banca:     '<rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/>',
+  orologio:  '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  nota:      '<path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"/><path d="M15 3v4a2 2 0 0 0 2 2h4"/>',
+  foto:      '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  chiudi:    '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  spunta:    '<path d="M20 6 9 17l-5-5"/>',
+  archivio:  '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  gruppo:    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  ok:        '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  attenzione:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  errore:    '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+  info:      '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>'
+}
+
+function icona(nome) {
+  return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + (ICONE[nome] || '') + '</svg>'
+}
+
+function riempiIcone(radice) {
+  Array.prototype.forEach.call((radice || document).querySelectorAll('i[data-ico]'), function (i) {
+    if (!i.firstChild) i.innerHTML = icona(i.getAttribute('data-ico'))
+  })
 }
 
 // ─── I paesi ─────────────────────────────────────────────────────────────────
@@ -132,9 +217,9 @@ function esc(s) {
 }
 
 function bannerHtml(tipo, msg, extraHtml) {
-  var icona = { ok: '✅', warn: '⚠️', err: '❌', info: 'ℹ️' }[tipo] || 'ℹ️'
+  var ico = { ok: 'ok', warn: 'attenzione', err: 'errore', info: 'info' }[tipo] || 'info'
   return '<div class="banner ' + tipo + '" role="alert">' +
-           '<span class="icona" aria-hidden="true">' + icona + '</span>' +
+           '<span class="icona">' + icona(ico) + '</span>' +
            '<div class="msg">' + msg + (extraHtml || '') + '</div>' +
          '</div>'
 }
@@ -162,24 +247,21 @@ function iniziali(c) {
   return (parole[0][0] + parole[1][0]).toUpperCase()
 }
 
-// Un colore stabile per contatto, dal nome: così le iniziali si distinguono.
-var COLORI_AVATAR = ['#2d6a4f', '#40916c', '#1d4e89', '#7b2cbf', '#b5651d', '#9d0208', '#0077b6', '#6a994e', '#bc6c25', '#5f0f40']
-function coloreAvatar(c) {
-  var s = contattoNome(c), h = 0
-  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-  return COLORI_AVATAR[h % COLORI_AVATAR.length]
+// Una tinta stabile per contatto, dal nome: così le iniziali si distinguono.
+function stileAvatar(c) {
+  return '--h:' + tintaDaTesto(contattoNome(c)) + ';--s:48%'
 }
 
 function avatarHtml(c, grande) {
   var cls = 'avatar' + (grande ? ' grande' : '')
   if (c.foto_url) {
     // Se la foto non si carica (file cancellato, bucket privato) si torna alle iniziali.
-    return '<div class="' + cls + '" style="background:' + coloreAvatar(c) + '">' +
+    return '<div class="' + cls + '" style="' + stileAvatar(c) + '">' +
              '<img src="' + esc(c.foto_url) + '" alt="" loading="lazy"' +
              ' onerror="this.parentNode.textContent=\'' + esc(iniziali(c)) + '\'" />' +
            '</div>'
   }
-  return '<div class="' + cls + '" style="background:' + coloreAvatar(c) + '">' + esc(iniziali(c)) + '</div>'
+  return '<div class="' + cls + '" style="' + stileAvatar(c) + '">' + esc(iniziali(c)) + '</div>'
 }
 
 // Il numero come va nel link tel: solo cifre e il + iniziale. Lo «(0)» della
@@ -219,16 +301,30 @@ function badgesCategorie(c) {
   var cats = categorieDi(c)
   var out = cats.map(function (k) {
     var info = categoriaInfo(k)
-    return '<span class="badge">' + info.i + ' ' + esc(info.n) + '</span>'
+    if (!info.attiva) {
+      return '<span class="badge spenta" style="' + info.stile + '"' +
+               ' title="Categoria disattivata: resta su questo contatto, non si offre ai nuovi">' +
+               '<i class="pallino"></i>' + esc(info.n) + '</span>'
+    }
+    return '<span class="badge" style="' + info.stile + '"><i class="pallino"></i>' + esc(info.n) + '</span>'
   })
   if (!cats.length) out.push('<span class="badge grigio">senza categoria</span>')
-  if (c.attivo === false) out.push('<span class="badge warn">📦 archiviato</span>')
+  if (c.attivo === false) out.push('<span class="badge warn">archiviato</span>')
   return out.join(' ')
 }
 
 // ─── Avvio ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async function () {
   if (el('piede-versione')) el('piede-versione').textContent = APP_VERSIONE
+  riempiIcone(document)
+
+  // Girando il tablet o allargando la finestra la scheda passa da sola fra
+  // «a tutto schermo» e «accanto all'elenco».
+  var attesaResize = null
+  window.addEventListener('resize', function () {
+    clearTimeout(attesaResize)
+    attesaResize = setTimeout(function () { if (vistaCorrente === 'scheda') aggiornaSplit() }, 150)
+  })
 
   // Sessione scaduta o chiusa da un'altra scheda: si torna al login.
   sb.auth.onAuthStateChange(function (evento) {
@@ -256,7 +352,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 document.addEventListener('keydown', function (ev) {
   if (ev.key !== 'Escape') return
   if (vistaCorrente === 'modulo') annullaModulo()
-  else if (vistaCorrente === 'scheda') mostraVista('lista')
+  else if (vistaCorrente === 'scheda' || vistaCorrente === 'categorie') mostraVista('lista')
 })
 
 function mostraPagina(quale) {
@@ -276,7 +372,7 @@ async function login(event) {
     mostraBanner('login-banner', 'err', 'Inserisci email e password.')
     return false
   }
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Accesso…' }
+  if (btn) { btn.disabled = true; btn.textContent = 'Accesso…' }
   try {
     const { data, error } = await sb.auth.signInWithPassword({ email: email, password: password })
     if (error) throw error
@@ -310,12 +406,19 @@ async function entraNellApp() {
   if (el('topbar-email')) el('topbar-email').textContent = currentUser.email || ''
   mostraPagina('app')
   pulisciBanner('banner-globale')
-  html('lista-contatti', '<div class="caricamento">⏳ Carico la rubrica…</div>')
+  html('lista-contatti', '<div class="caricamento">Carico la rubrica…</div>')
   try {
     await loadAziendaId()
     await sondaColonne()
     await loadContatti()
+    // Senza categorie la rubrica si usa lo stesso: i contatti tengono le loro
+    // (il modulo le ripropone spuntate anche se non sono in tabella).
+    try { await loadCategorie() } catch (ec) { console.warn('Categorie:', ec) }
     mostraVista('lista')
+    if (categorieErrore) {
+      mostraBanner('banner-globale', 'warn', 'Non riesco a leggere le categorie (rubrica_categorie): ' + categorieErrore +
+        ' I contatti restano visibili e conservano le loro categorie.')
+    }
   } catch (e) {
     console.error('Avvio:', e)
     mostraBanner('banner-globale', 'err', 'Non riesco a caricare la rubrica: ' + spiegaErrore(e))
@@ -373,20 +476,56 @@ function contattoById(id) {
   return contatti.filter(function (c) { return c.id === id })[0] || null
 }
 
+// ─── Lettura delle categorie ─────────────────────────────────────────────────
+// Tutte le righe dell'azienda, anche le disattivate: servono per dare il nome
+// giusto ai contatti che le hanno ancora.
+async function loadCategorie() {
+  categorieErrore = null
+  const { data, error } = await sb.from('rubrica_categorie')
+    .select('id, nome, ordine, attiva')
+    .eq('azienda_id', currentAziendaId)
+    .order('ordine', { ascending: true })
+  if (error) {
+    categorieErrore = spiegaErrore(error)
+    throw error
+  }
+  CATEGORIE = (data || []).map(rigaCategoria)
+  ordinaCategorie()
+  // Il filtro aperto su una categoria che non c'è più tra le attive torna a «Tutti».
+  if (filtroCategoria !== 'tutti' && filtroCategoria !== 'archiviati' &&
+      !categorieAttive().some(function (c) { return c.k === filtroCategoria })) {
+    filtroCategoria = 'tutti'
+  }
+  return CATEGORIE
+}
+
 // ─── Viste ───────────────────────────────────────────────────────────────────
+// Sullo schermo grande la scheda si apre accanto all'elenco, come nei CRM;
+// sul telefono prende tutto lo schermo.
+var MQ_SPLIT = window.matchMedia('(min-width: 1024px)')
+
+function aggiornaSplit() {
+  var split = vistaCorrente === 'scheda' && MQ_SPLIT.matches
+  el('contenuto').classList.toggle('split', split)
+  el('vista-lista').hidden = !(vistaCorrente === 'lista' || split)
+  return split
+}
+
 function mostraVista(quale) {
   vistaCorrente = quale
-  el('vista-lista').hidden  = quale !== 'lista'
   el('vista-scheda').hidden = quale !== 'scheda'
   el('vista-modulo').hidden = quale !== 'modulo'
+  el('vista-categorie').hidden = quale !== 'categorie'
+  var split = aggiornaSplit()
   if (quale === 'lista') {
     letturaId = null
     renderLista()
   } else {
     // Gli esiti («Contatto eliminato») stanno sull'elenco: altrove non servono.
     pulisciBanner('banner-globale')
+    if (split) renderLista()   // per evidenziare il contatto aperto
   }
-  window.scrollTo(0, 0)
+  if (!split) window.scrollTo(0, 0)
 }
 
 // ─── Elenco: ricerca, filtri, righe ──────────────────────────────────────────
@@ -426,25 +565,36 @@ function renderLista() {
   var attivi = cercati.filter(function (c) { return c.attivo !== false })
   var archiviati = cercati.filter(function (c) { return c.attivo === false })
 
-  // I pulsanti-filtro con i conteggi (sulla ricerca corrente).
+  // I pulsanti-filtro con i conteggi (sulla ricerca corrente): solo le
+  // categorie attive. La chiave passa da data-k, non dentro l'onclick.
+  var cats = categorieAttive()
+  if (filtroCategoria !== 'tutti' && filtroCategoria !== 'archiviati' &&
+      !cats.some(function (cat) { return cat.k === filtroCategoria })) {
+    filtroCategoria = 'tutti'
+  }
   var conteggi = {}
-  CATEGORIE.forEach(function (cat) { conteggi[cat.k] = 0 })
+  cats.forEach(function (cat) { conteggi[cat.k] = 0 })
   attivi.forEach(function (c) {
     categorieDi(c).forEach(function (k) { if (k in conteggi) conteggi[k]++ })
   })
   var f = '<button type="button" role="tab" class="filtro' + (filtroCategoria === 'tutti' ? ' attivo' : '') + '"' +
-            ' onclick="impostaFiltro(\'tutti\')">👥 Tutti <span class="conta">' + attivi.length + '</span></button>'
-  CATEGORIE.forEach(function (cat) {
+            ' onclick="impostaFiltro(\'tutti\')">Tutti <span class="conta">' + attivi.length + '</span></button>'
+  cats.forEach(function (cat) {
     f += '<button type="button" role="tab" class="filtro' + (filtroCategoria === cat.k ? ' attivo' : '') + '"' +
-           ' onclick="impostaFiltro(\'' + cat.k + '\')">' + cat.i + ' ' + esc(cat.n) +
+           ' style="' + cat.stile + '" data-k="' + esc(cat.k) + '" onclick="impostaFiltro(this.dataset.k)">' +
+           '<i class="pallino"></i>' + esc(cat.n) +
            ' <span class="conta">' + conteggi[cat.k] + '</span></button>'
   })
   // Gli archiviati si vedono solo se ce ne sono, e solo chiedendolo.
   if (archiviati.length || filtroCategoria === 'archiviati') {
     f += '<button type="button" role="tab" class="filtro archiviati' + (filtroCategoria === 'archiviati' ? ' attivo' : '') + '"' +
-           ' onclick="impostaFiltro(\'archiviati\')">📦 Archiviati <span class="conta">' + archiviati.length + '</span></button>'
+           ' onclick="impostaFiltro(\'archiviati\')">' + icona('archivio') + 'Archiviati <span class="conta">' + archiviati.length + '</span></button>'
   }
+  var box = el('filtri-categorie')
+  var scorrimento = box ? box.scrollLeft : 0
   html('filtri-categorie', f)
+  // Sul telefono i filtri scorrono di lato: ridisegnandoli non si torna all'inizio.
+  if (box) box.scrollLeft = scorrimento
 
   var mostrati
   if (filtroCategoria === 'tutti') mostrati = attivi
@@ -468,28 +618,38 @@ function renderLista() {
     return
   }
 
-  html('lista-contatti', mostrati.map(rigaHtml).join(''))
+  // Le lettere A, B, C… come nella rubrica del telefono. Solo per nome: in
+  // ricerca l'ordine è lo stesso, quindi restano utili anche lì.
+  var out = '', lettera = null
+  mostrati.forEach(function (c) {
+    var l = normalizzaTesto(contattoNome(c)).charAt(0).toUpperCase()
+    if (!/[A-Z]/.test(l)) l = '#'
+    if (l !== lettera) { out += '<div class="lettera">' + l + '</div>'; lettera = l }
+    out += rigaHtml(c)
+  })
+  html('lista-contatti', out)
 }
 
 function rigaHtml(c) {
   var sub = []
-  if (c.referente) sub.push('👤 ' + esc(c.referente))
-  if (c.citta) sub.push(esc([c.cap, c.citta].filter(Boolean).join(' ')))
-  if (c.email) sub.push(esc(c.email))
+  if (c.referente) sub.push(esc(c.referente))
+  if (c.citta) sub.push(esc(c.citta))
+  if (!sub.length && c.email) sub.push(esc(c.email))
 
   // I link tel: accanto a ogni numero. stopPropagation: toccare il telefono
   // deve chiamare, non aprire la scheda.
   var azioni = ''
-  if (c.telefono && telHref(c.telefono)) {
-    azioni += '<a class="btn-icona" href="' + esc(telHref(c.telefono)) + '" title="Chiama ' + esc(c.telefono) + '"' +
-              ' onclick="event.stopPropagation()">📞</a>'
-  }
   if (c.cellulare && telHref(c.cellulare)) {
     azioni += '<a class="btn-icona" href="' + esc(telHref(c.cellulare)) + '" title="Chiama cellulare ' + esc(c.cellulare) + '"' +
-              ' onclick="event.stopPropagation()">📱</a>'
+              ' aria-label="Chiama cellulare" onclick="event.stopPropagation()">' + icona('cellulare') + '</a>'
+  }
+  if (c.telefono && telHref(c.telefono)) {
+    azioni += '<a class="btn-icona" href="' + esc(telHref(c.telefono)) + '" title="Chiama ' + esc(c.telefono) + '"' +
+              ' aria-label="Chiama telefono" onclick="event.stopPropagation()">' + icona('telefono') + '</a>'
   }
 
-  return '<div class="riga' + (c.attivo === false ? ' archiviata' : '') + '" tabindex="0" role="button"' +
+  return '<div class="riga' + (c.attivo === false ? ' archiviata' : '') + (c.id === letturaId ? ' selezionata' : '') + '"' +
+           ' tabindex="0" role="button"' +
            ' onclick="apriContatto(\'' + c.id + '\')"' +
            ' onkeydown="if(event.key===\'Enter\')apriContatto(\'' + c.id + '\')">' +
            avatarHtml(c) +
@@ -512,56 +672,141 @@ function apriContatto(id) {
   mostraVista('scheda')
 }
 
-function voce(etich, valHtml, larga) {
-  if (!valHtml) return ''
-  return '<div class="voce' + (larga ? ' larga' : '') + '"><div class="etich">' + etich + '</div>' +
-         '<div class="val' + (larga ? ' note' : '') + '">' + valHtml + '</div></div>'
+// Il numero per WhatsApp: internazionale, solo cifre, senza «+». Un numero
+// scritto senza prefisso («079 …») prende quello del paese del contatto; se
+// il paese non è fra questi non si indovina: niente pulsante WhatsApp.
+var PREFISSI_PAESE = { CH: '41', IT: '39', DE: '49', FR: '33', AT: '43', LI: '423' }
+
+function whatsappHref(numero, paese) {
+  var s = String(numero || '').trim().replace(/\(0\)/g, '')
+  var cifre = s.replace(/[^0-9]/g, '')
+  if (!cifre) return ''
+  if (s.charAt(0) === '+') return 'https://wa.me/' + cifre
+  if (cifre.indexOf('00') === 0) return 'https://wa.me/' + cifre.slice(2)
+  var pref = PREFISSI_PAESE[String(paese || PAESE_PREDEFINITO).toUpperCase()]
+  if (!pref) return ''
+  // In Italia lo 0 dei fissi fa parte del numero; altrove si toglie.
+  return 'https://wa.me/' + pref + (pref === '39' ? cifre : cifre.replace(/^0/, ''))
 }
 
-function recapitoTel(numero, icona) {
-  if (!numero) return ''
-  var href = telHref(numero)
-  return '<span class="recapito">' + esc(numero) +
-         (href ? ' <a class="btn-icona" href="' + esc(href) + '" title="Chiama">' + icona + '</a>' : '') +
-         '</span>'
+// Google Maps apre l'app sia su Android sia su iPhone (se installata),
+// altrimenti la pagina web.
+function mappaHref(c) {
+  var q = [c.indirizzo, [c.cap, c.citta].filter(Boolean).join(' '), nomePaese(c.paese)].filter(Boolean).join(', ')
+  return q ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q) : ''
+}
+
+function azioneRapida(href, ico, etich, esterno) {
+  return '<a class="azione" href="' + esc(href) + '"' + (esterno ? ' target="_blank" rel="noopener"' : '') + '>' +
+           icona(ico) + '<span>' + etich + '</span></a>'
+}
+
+// Una riga della scheda: icona, etichetta piccola, valore. Con href tutta la
+// riga si tocca (chiama, scrive, apre la mappa); con copia ha il pulsante «copia».
+function infoRiga(ico, etich, valHtml, opz) {
+  if (!valHtml) return ''
+  opz = opz || {}
+  var corpo = '<span class="info-ico">' + icona(ico) + '</span>' +
+              '<div class="info-testo">' + (etich ? '<div class="info-etich">' + etich + '</div>' : '') +
+                '<div class="info-val' + (opz.note ? ' note' : '') + '">' + valHtml + '</div></div>'
+  if (opz.href) {
+    return '<a class="info-riga" href="' + esc(opz.href) + '"' + (opz.esterno ? ' target="_blank" rel="noopener"' : '') + '>' +
+             corpo + '<span class="info-coda">' + icona('avanti') + '</span></a>'
+  }
+  if (opz.copia) {
+    return '<div class="info-riga">' + corpo +
+             '<button type="button" class="btn-copia" title="Copia" aria-label="Copia ' + esc(etich) + '"' +
+               ' data-t="' + esc(opz.copia) + '" data-n="' + esc(etich) + '" onclick="copiaTesto(this.dataset.t, this.dataset.n)">' +
+               icona('copia') + '</button></div>'
+  }
+  return '<div class="info-riga">' + corpo + '</div>'
+}
+
+function gruppoHtml(titolo, righe) {
+  return righe ? '<div class="gruppo"><div class="gruppo-titolo">' + titolo + '</div>' + righe + '</div>' : ''
+}
+
+async function copiaTesto(testo, nome) {
+  try {
+    await navigator.clipboard.writeText(testo)
+    mostraBanner('scheda-banner', 'ok', nome + ' copiato.')
+  } catch (_) {
+    // Senza permesso agli appunti (http, browser vecchi) si ripiega su execCommand.
+    var t = document.createElement('textarea')
+    t.value = testo; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0'
+    document.body.appendChild(t); t.select()
+    var ok = false
+    try { ok = document.execCommand('copy') } catch (_) { ok = false }
+    document.body.removeChild(t)
+    mostraBanner('scheda-banner', ok ? 'ok' : 'warn', ok ? nome + ' copiato.' : 'Non riesco a copiare: tieni premuto sul testo e copialo a mano.')
+  }
+  setTimeout(function () {
+    var b = el('scheda-banner')
+    if (b && /copiato/.test(b.textContent)) pulisciBanner('scheda-banner')
+  }, 2500)
 }
 
 function schedaHtml(c) {
-  var indirizzo = [c.indirizzo, [c.cap, c.citta].filter(Boolean).join(' ')]
-    .filter(Boolean).map(esc).join('<br>')
+  var citta = [c.cap, c.citta].filter(Boolean).join(' ')
+  var indirizzo = [c.indirizzo, citta].filter(Boolean).map(esc).join('<br>')
+  var paeseOk = !c.paese || paeseValido(c.paese)
   var paese = c.paese
-    ? (paeseValido(c.paese) ? esc(nomePaese(c.paese) + ' (' + c.paese + ')')
-                            : '<span class="badge err">⚠️ «' + esc(c.paese) + '» non valido — apri Modifica e scegli il paese</span>')
+    ? (paeseOk ? esc(nomePaese(c.paese))
+               : '<span class="badge err">«' + esc(c.paese) + '» non valido — apri Modifica e scegli il paese</span>')
     : ''
-  var righe =
-    voce('Telefono', recapitoTel(c.telefono, '📞')) +
-    voce('Cellulare', recapitoTel(c.cellulare, '📱')) +
-    voce('Email', c.email ? '<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + '</a>' : '') +
-    voce('Sito web', c.sito_web ? '<a href="' + esc(urlSito(c.sito_web)) + '" target="_blank" rel="noopener">' + esc(c.sito_web) + '</a>' : '') +
-    voce('Indirizzo', indirizzo) +
-    voce('Paese', paese) +
-    voce('UID / Partita IVA', c.uid_partita_iva ? '<span class="mono">' + esc(c.uid_partita_iva) + '</span>' : '') +
-    voce('IBAN', c.iban ? '<span class="mono">' + esc(ibanLeggibile(c.iban)) + '</span>' : '') +
-    voce('Giorni di pagamento', c.giorni_pagamento == null ? '' : esc(c.giorni_pagamento + ' giorni')) +
-    voce('Note', c.note ? esc(c.note) : '', true)
+
+  // Le azioni rapide sotto il nome, come nella rubrica del telefono.
+  var azioni = []
+  if (c.cellulare && telHref(c.cellulare)) azioni.push(azioneRapida(telHref(c.cellulare), 'cellulare', 'Cellulare'))
+  if (c.telefono && telHref(c.telefono)) azioni.push(azioneRapida(telHref(c.telefono), 'telefono', 'Chiama'))
+  var wa = c.cellulare ? whatsappHref(c.cellulare, c.paese) : ''
+  if (wa) azioni.push(azioneRapida(wa, 'messaggio', 'WhatsApp', true))
+  if (c.email) azioni.push(azioneRapida('mailto:' + c.email, 'email', 'Email'))
+  var mappa = (c.indirizzo || c.citta) ? mappaHref(c) : ''
+  if (mappa) azioni.push(azioneRapida(mappa, 'mappa', 'Mappa', true))
+
+  var recapiti =
+    infoRiga('cellulare', 'Cellulare', c.cellulare ? esc(c.cellulare) : '', { href: telHref(c.cellulare) }) +
+    infoRiga('telefono', 'Telefono', c.telefono ? esc(c.telefono) : '', { href: telHref(c.telefono) }) +
+    infoRiga('email', 'Email', c.email ? esc(c.email) : '', { href: c.email ? 'mailto:' + c.email : '' }) +
+    infoRiga('sito', 'Sito web', c.sito_web ? esc(c.sito_web) : '', { href: urlSito(c.sito_web), esterno: true })
+
+  var dove =
+    infoRiga('mappa', 'Indirizzo', indirizzo, { href: mappa, esterno: true }) +
+    infoRiga('sito', 'Paese', paese)
+
+  var amministrativi =
+    infoRiga('documento', 'UID / Partita IVA', c.uid_partita_iva ? '<span class="mono">' + esc(c.uid_partita_iva) + '</span>' : '',
+             { copia: c.uid_partita_iva }) +
+    infoRiga('banca', 'IBAN', c.iban ? '<span class="mono">' + esc(ibanLeggibile(c.iban)) + '</span>' : '',
+             { copia: c.iban ? String(c.iban).replace(/\s+/g, '') : '' }) +
+    infoRiga('orologio', 'Giorni di pagamento', c.giorni_pagamento == null ? '' : esc(c.giorni_pagamento + ' giorni'))
+
+  var note = infoRiga('nota', '', c.note ? esc(c.note) : '', { note: true })
+
+  var corpo = gruppoHtml('Recapiti', recapiti) + gruppoHtml('Sede', dove) +
+              gruppoHtml('Dati amministrativi', amministrativi) + gruppoHtml('Note', note)
 
   var meta = []
-  if (c.created_at) meta.push('creato il ' + dataIt(c.created_at))
+  if (c.created_at) meta.push('Creato il ' + dataIt(c.created_at))
   if (c.updated_at && c.updated_at !== c.created_at) meta.push('modificato il ' + dataIt(c.updated_at))
+
+  var sotto = []
+  if (c.ragione_sociale && (c.nome || c.cognome)) sotto.push(esc([c.nome, c.cognome].filter(Boolean).join(' ')))
+  if (c.referente) sotto.push('Referente: ' + esc(c.referente))
 
   return '<div class="scheda-testa">' +
            avatarHtml(c, true) +
-           '<div>' +
-             '<div class="scheda-nome">' + esc(contattoNome(c)) + '</div>' +
-             (c.ragione_sociale && (c.nome || c.cognome)
-               ? '<div class="scheda-referente">' + esc([c.nome, c.cognome].filter(Boolean).join(' ')) + '</div>' : '') +
-             (c.referente ? '<div class="scheda-referente">👤 Referente: ' + esc(c.referente) + '</div>' : '') +
-             '<div class="scheda-badges">' + badgesCategorie(c) + '</div>' +
-           '</div>' +
+           '<div class="scheda-nome">' + esc(contattoNome(c)) + '</div>' +
+           (sotto.length ? '<div class="scheda-referente">' + sotto.join(' · ') + '</div>' : '') +
+           '<div class="scheda-badges">' + badgesCategorie(c) + '</div>' +
          '</div>' +
-         (righe ? '<div class="scheda-griglia">' + righe + '</div>'
-                : '<div class="dim">Nessun altro dato: apri Modifica per completare la scheda.</div>') +
-         (meta.length ? '<div class="dim" style="margin-top:16px;font-size:11px">' + esc(meta.join(' · ')) + '</div>' : '')
+         (azioni.length ? '<div class="azioni-rapide">' + azioni.join('') + '</div>' : '') +
+         (corpo || '<div class="card dim">Nessun altro dato: tocca Modifica per completare la scheda.</div>') +
+         (meta.length ? '<div class="scheda-meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+         '<div class="scheda-elimina">' +
+           '<button type="button" class="btn-link" onclick="chiediElimina()">' + icona('elimina') + 'Elimina contatto</button>' +
+         '</div>'
 }
 
 function dataIt(iso) {
@@ -579,9 +824,11 @@ function chiediElimina() {
   html('scheda-banner', bannerHtml('err',
     '<strong>Eliminare ' + esc(contattoNome(c)) + '?</strong> L\'operazione non si annulla.',
     '<div class="banner-azioni">' +
-      '<button type="button" class="btn-danger pieno" onclick="eliminaConfermato()">🗑️ Sì, elimina</button>' +
+      '<button type="button" class="btn-danger pieno" onclick="eliminaConfermato()">Sì, elimina</button>' +
       '<button type="button" class="btn-secondary" onclick="pulisciBanner(\'scheda-banner\')">Annulla</button>' +
     '</div>'))
+  // «Elimina» sta in fondo alla scheda, la conferma in cima: la si porta in vista.
+  el('scheda-banner').scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 async function eliminaConfermato() {
@@ -589,7 +836,7 @@ async function eliminaConfermato() {
   var c = contattoById(id)
   if (!c) return
   var nome = contattoNome(c)
-  html('scheda-banner', '<div class="caricamento">⏳ Eliminazione…</div>')
+  html('scheda-banner', '<div class="caricamento">Eliminazione…</div>')
   try {
     const { error } = await sb.from('tm_contatti').delete().eq('id', id).eq('azienda_id', currentAziendaId)
     if (error) throw error
@@ -605,7 +852,7 @@ async function eliminaConfermato() {
         '(fatture, acquisti o movimenti). Quei documenti devono continuare a dire a chi si riferiscono. ' +
         'Si può <strong>archiviare</strong>: sparisce dagli elenchi, i documenti restano leggibili.',
         '<div class="banner-azioni">' +
-          '<button type="button" class="btn-primary" onclick="archiviaCorrente()">📦 Archivia il contatto</button>' +
+          '<button type="button" class="btn-primary" onclick="archiviaCorrente()">Archivia il contatto</button>' +
           '<button type="button" class="btn-secondary" onclick="pulisciBanner(\'scheda-banner\')">Annulla</button>' +
         '</div>'))
       return
@@ -617,7 +864,7 @@ async function eliminaConfermato() {
 async function archiviaCorrente() {
   var id = letturaId
   if (!id) return
-  html('scheda-banner', '<div class="caricamento">⏳ Archiviazione…</div>')
+  html('scheda-banner', '<div class="caricamento">Archiviazione…</div>')
   try {
     const { error } = await sb.from('tm_contatti').update({ attivo: false }).eq('id', id).eq('azienda_id', currentAziendaId)
     if (error) throw error
@@ -630,12 +877,27 @@ async function archiviaCorrente() {
 }
 
 // ─── Modulo: nuovo / modifica ────────────────────────────────────────────────
+// Le spunte sono le categorie attive. In più, già spuntate, quelle che il
+// contatto ha e che non sono attive (disattivate o sparite dalla tabella):
+// senza, salvando la scheda si perderebbero di nascosto.
 function renderCategorieCheck(selezionate) {
   var sel = selezionate || []
-  html('c-categorie', CATEGORIE.map(function (cat) {
-    return '<label class="check">' +
-             '<input type="checkbox" name="c-cat" value="' + cat.k + '"' + (sel.indexOf(cat.k) !== -1 ? ' checked' : '') + ' />' +
-             '<span>' + cat.i + ' ' + esc(cat.n) + '</span>' +
+  var voci = categorieAttive().slice()
+  sel.forEach(function (k) {
+    if (!voci.some(function (cat) { return cat.k === k })) voci.push(categoriaInfo(k))
+  })
+  if (!voci.length) {
+    html('c-categorie', '<div class="dim">Nessuna categoria attiva: aggiungile da «Gestisci categorie».</div>')
+    return
+  }
+  html('c-categorie', voci.map(function (cat) {
+    return '<label class="chip-cat' + (cat.attiva ? '' : ' spenta') + '"' +
+             (cat.attiva ? '' : ' title="Categoria disattivata: togli la spunta per toglierla dal contatto"') + '>' +
+             '<input type="checkbox" name="c-cat" value="' + esc(cat.k) + '"' + (sel.indexOf(cat.k) !== -1 ? ' checked' : '') + ' />' +
+             '<span class="chip-corpo" style="' + cat.stile + '">' +
+               '<i class="pallino"></i><span class="spunta">' + icona('spunta') + '</span>' + esc(cat.n) +
+               (cat.attiva ? '' : ' <span class="dim">(disattivata)</span>') +
+             '</span>' +
            '</label>'
   }).join(''))
 }
@@ -664,7 +926,7 @@ function nuovoContatto() {
   el('c-paese').innerHTML = buildPaeseOptions(PAESE_PREDEFINITO)
   el('c-attivo-riga').hidden = true
   el('modulo-titolo').textContent = 'Nuovo contatto'
-  el('modulo-salva-btn').textContent = '💾 Salva contatto'
+  el('modulo-salva-btn').textContent = 'Salva contatto'
   renderFotoAnteprima(null)
   aggiornaLinkRecapiti()
   mostraVista('modulo')
@@ -706,7 +968,7 @@ function modificaContatto(id) {
       'In Pre-contabilità questo contatto è un «cliente». Spunta Preventivi, Appalti presi o Appalti conclusi per collocarlo.')
   }
   el('modulo-titolo').textContent = contattoNome(c)
-  el('modulo-salva-btn').textContent = '💾 Salva modifiche'
+  el('modulo-salva-btn').textContent = 'Salva modifiche'
   renderFotoAnteprima(c.foto_url ? { url: c.foto_url } : null, c)
   aggiornaLinkRecapiti()
   mostraVista('modulo')
@@ -749,7 +1011,7 @@ function renderFotoAnteprima(foto, c) {
   if (!box) return
   if (foto && foto.url) {
     box.className = 'foto-anteprima'
-    box.style.background = ''
+    box.setAttribute('style', '')
     box.innerHTML = '<img src="' + esc(foto.url) + '" alt="Foto del contatto" />'
     if (btnTogli) btnTogli.hidden = false
     return
@@ -758,12 +1020,12 @@ function renderFotoAnteprima(foto, c) {
   var ini = contattoNome(finto) ? iniziali(finto) : ''
   if (ini) {
     box.className = 'foto-anteprima'
-    box.style.background = coloreAvatar(finto)
+    box.setAttribute('style', stileAvatar(finto))
     box.textContent = ini
   } else {
     box.className = 'foto-anteprima vuota'
-    box.style.background = ''
-    box.textContent = '📷'
+    box.setAttribute('style', '')
+    box.innerHTML = icona('foto')
   }
   if (btnTogli) btnTogli.hidden = true
 }
@@ -979,8 +1241,8 @@ function mostraAvvisoDoppione(simili) {
     return '<div class="dop-riga">' +
              '<div>' +
                '<strong>' + esc(contattoNome(x)) + '</strong> ' +
-               (s.forte ? '<span class="badge err">🆔 stesso UID</span>' : '<span class="badge warn">👥 stesso nome</span>') +
-               (x.attivo === false ? ' <span class="badge warn">📦 archiviato</span>' : '') +
+               (s.forte ? '<span class="badge err">stesso UID</span>' : '<span class="badge warn">stesso nome</span>') +
+               (x.attivo === false ? ' <span class="badge warn">archiviato</span>' : '') +
                '<div class="dim">' + esc(dettagli || 'nessun recapito registrato') + '</div>' +
              '</div>' +
              '<button type="button" class="btn-secondary btn-piccolo" onclick="apriContattoDaAvviso(\'' + x.id + '\')">Apri</button>' +
@@ -995,7 +1257,7 @@ function mostraAvvisoDoppione(simili) {
     ' Decidi tu: il programma non salva e non scarta niente da solo.',
     '<div class="dop-lista">' + righe + '</div>' +
     '<div class="banner-azioni">' +
-      '<button type="button" class="btn-primary" onclick="salvaComunque()">💾 Salva comunque</button>' +
+      '<button type="button" class="btn-primary" onclick="salvaComunque()">Salva comunque</button>' +
       '<button type="button" class="btn-secondary" onclick="pulisciBanner(\'modulo-banner\')">Correggo</button>' +
     '</div>'))
   el('modulo-banner').scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1028,7 +1290,7 @@ async function salvaContatto(event) {
     }
     forzaSalvataggio = false
 
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Salvataggio…' }
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…' }
 
     var id = editingId
     var fotoUrlPrecedente = id && contattoById(id) ? contattoById(id).foto_url : null
@@ -1072,7 +1334,237 @@ async function salvaContatto(event) {
     mostraBanner('modulo-banner', 'err', 'Non salvato: ' + spiegaErrore(e))
     el('modulo-banner').scrollIntoView({ behavior: 'smooth', block: 'center' })
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = testoBtn || '💾 Salva contatto' }
+    if (btn) { btn.disabled = false; btn.textContent = testoBtn || 'Salva contatto' }
+  }
+  return false
+}
+
+// ─── Gestisci categorie ──────────────────────────────────────────────────────
+// Rinominare cambia solo `nome`; aggiungere crea un id leggibile dal nome e non
+// sovrascrive mai un id che c'è già; disattivare mette attiva = false. Nessuna
+// riga si cancella. Dopo ogni modifica la lista in memoria è già aggiornata:
+// filtri e spunte la usano subito, senza ricaricare niente.
+async function apriGestioneCategorie() {
+  pulisciBanner('categorie-banner')
+  setVal('cat-nuovo-nome', '')
+  aggiornaIdNuovaCategoria()
+  renderGestioneCategorie()
+  mostraVista('categorie')
+  // Si rilegge la tabella: qualcun altro può averla cambiata nel frattempo.
+  try {
+    await loadCategorie()
+  } catch (e) {
+    mostraBanner('categorie-banner', 'err', 'Non riesco a leggere le categorie (rubrica_categorie): ' + spiegaErrore(e))
+  }
+  renderGestioneCategorie()
+}
+
+// "Geometri" → "geometri", "Appalti presi" → "appalti_presi", "Caffè & Bar" → "caffe_bar".
+function slugCategoria(nome) {
+  return String(nome || '').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
+    .replace(/_+$/, '')
+}
+
+function aggiornaIdNuovaCategoria() {
+  var nome = getVal('cat-nuovo-nome')
+  var id = slugCategoria(nome)
+  var esistente = id ? CATEGORIE.filter(function (c) { return c.k === id })[0] : null
+  html('cat-nuovo-id', !nome ? 'L\'id interno si ricava dal nome e non cambia più, nemmeno rinominando.'
+    : !id ? 'Il nome deve contenere almeno una lettera o una cifra.'
+    : esistente ? 'L\'id <span class="mono">' + esc(id) + '</span> esiste già («' + esc(esistente.n) + '»' +
+                  (esistente.attiva ? '' : ', disattivata') + ').'
+    : 'Id interno: <span class="mono">' + esc(id) + '</span>')
+}
+
+function contaContattiCategoria(k) {
+  return contatti.filter(function (c) { return categorieDi(c).indexOf(k) !== -1 }).length
+}
+
+function renderGestioneCategorie() {
+  if (!CATEGORIE.length) {
+    html('categorie-elenco', '<div class="vuoto">' + (categorieErrore
+      ? '<strong>Categorie non disponibili.</strong>' + esc(categorieErrore)
+      : '<strong>Nessuna categoria.</strong>Aggiungine una qui sopra.') + '</div>')
+    return
+  }
+  html('categorie-elenco', CATEGORIE.map(function (cat) {
+    var n = contaContattiCategoria(cat.k)
+    // Il nome si cambia dove sta; «Salva nome» compare solo se è cambiato.
+    // Invio salva, Esc rimette il nome di prima.
+    return '<div class="cat-riga' + (cat.attiva ? '' : ' spenta') + '" style="' + cat.stile + '">' +
+             '<i class="pallino"></i>' +
+             '<div class="cat-main">' +
+               '<input type="text" maxlength="60" aria-label="Nome della categoria" value="' + esc(cat.n) + '"' +
+                 ' data-cat-nome="' + esc(cat.k) + '" enterkeyhint="done"' +
+                 ' oninput="segnaNomeCambiato(this)"' +
+                 ' onkeydown="tastoNomeCategoria(event, this)" />' +
+               '<div class="cat-meta">' + n + (n === 1 ? ' contatto' : ' contatti') +
+                 ' · <span class="mono">' + esc(cat.k) + '</span>' +
+                 (cat.attiva ? '' : ' · <span class="badge spenta">disattivata</span>') +
+               '</div>' +
+             '</div>' +
+             '<div class="cat-comandi">' +
+               '<button type="button" class="btn-primary btn-piccolo cat-salva" data-k="' + esc(cat.k) + '"' +
+                 ' onclick="rinominaCategoria(this.dataset.k)">Salva nome</button>' +
+               (cat.attiva
+                 ? '<button type="button" class="btn-secondary btn-piccolo" data-k="' + esc(cat.k) + '" onclick="impostaCategoriaAttiva(this.dataset.k, false)">Disattiva</button>'
+                 : '<button type="button" class="btn-secondary btn-piccolo" data-k="' + esc(cat.k) + '" onclick="impostaCategoriaAttiva(this.dataset.k, true)">Riattiva</button>') +
+             '</div>' +
+           '</div>'
+  }).join(''))
+}
+
+function segnaNomeCambiato(input) {
+  var riga = input.closest('.cat-riga')
+  if (riga) riga.classList.toggle('modificata', input.value.trim() !== input.defaultValue.trim())
+}
+
+function tastoNomeCategoria(ev, input) {
+  if (ev.key === 'Enter') {
+    ev.preventDefault()
+    rinominaCategoria(input.dataset.catNome)
+  } else if (ev.key === 'Escape') {
+    // Qui Esc annulla la modifica del nome, non chiude la pagina.
+    ev.stopPropagation()
+    input.value = input.defaultValue
+    segnaNomeCambiato(input)
+    input.blur()
+  }
+}
+
+function inputNomeCategoria(k) {
+  return Array.prototype.slice.call(document.querySelectorAll('[data-cat-nome]'))
+    .filter(function (i) { return i.dataset.catNome === k })[0] || null
+}
+
+// Un update che la RLS non lascia passare non dà errore: torna zero righe.
+// Per questo si chiede la riga indietro e si controlla che ci sia.
+async function aggiornaRigaCategoria(k, campi) {
+  const { data, error } = await sb.from('rubrica_categorie').update(campi)
+    .eq('id', k).eq('azienda_id', currentAziendaId)
+    .select('id, nome, ordine, attiva')
+  if (error) throw error
+  if (!data || !data.length) {
+    throw new Error('il database non ha aggiornato nessuna riga (permessi su rubrica_categorie?).')
+  }
+  return data[0]
+}
+
+function sostituisciCategoria(riga) {
+  var nuova = rigaCategoria(riga)
+  CATEGORIE = CATEGORIE.map(function (c) { return c.k === nuova.k ? nuova : c })
+  ordinaCategorie()
+  return nuova
+}
+
+async function rinominaCategoria(k) {
+  var cat = CATEGORIE.filter(function (c) { return c.k === k })[0]
+  var input = inputNomeCategoria(k)
+  if (!cat || !input) return
+  var nome = input.value.trim()
+  if (!nome) {
+    mostraBanner('categorie-banner', 'err', 'Il nome non può essere vuoto.')
+    input.value = cat.n
+    return
+  }
+  if (nome === cat.n) {
+    mostraBanner('categorie-banner', 'info', '«' + nome + '»: il nome è già questo, niente da salvare.')
+    return
+  }
+  var doppia = CATEGORIE.filter(function (c) { return c.k !== k && normalizzaTesto(c.n) === normalizzaTesto(nome) })[0]
+  if (doppia) {
+    mostraBanner('categorie-banner', 'warn', 'C\'è già una categoria che si chiama «' + doppia.n + '»' +
+      (doppia.attiva ? '' : ' (disattivata)') + ': scegli un nome diverso.')
+    input.focus()
+    return
+  }
+  var vecchio = cat.n
+  html('categorie-banner', '<div class="caricamento">Rinomino…</div>')
+  try {
+    sostituisciCategoria(await aggiornaRigaCategoria(k, { nome: nome }))
+    renderGestioneCategorie()
+    var n = contaContattiCategoria(k)
+    mostraBanner('categorie-banner', 'ok', 'Rinominata: «' + vecchio + '» → «' + nome + '». ' +
+      (n ? (n === 1 ? 'Il contatto che l\'aveva la mostra' : 'I ' + n + ' contatti che l\'avevano la mostrano') + ' già col nome nuovo.'
+         : 'Nessun contatto la usa ancora.'))
+  } catch (e) {
+    console.warn('Rinomina categoria:', e)
+    mostraBanner('categorie-banner', 'err', 'Non rinominata: ' + spiegaErrore(e))
+  }
+}
+
+async function impostaCategoriaAttiva(k, attiva) {
+  var cat = CATEGORIE.filter(function (c) { return c.k === k })[0]
+  if (!cat) return
+  html('categorie-banner', '<div class="caricamento">' + (attiva ? 'Riattivo' : 'Disattivo') + '…</div>')
+  try {
+    var nuova = sostituisciCategoria(await aggiornaRigaCategoria(k, { attiva: attiva }))
+    if (!attiva && filtroCategoria === k) filtroCategoria = 'tutti'
+    renderGestioneCategorie()
+    var n = contaContattiCategoria(k)
+    mostraBanner('categorie-banner', 'ok', attiva
+      ? '«' + nuova.n + '» è di nuovo attiva: torna fra i filtri e nelle spunte.'
+      : '«' + nuova.n + '» disattivata: non si offre più ai contatti. ' +
+        (n ? (n === 1 ? 'Il contatto che l\'aveva la conserva' : 'I ' + n + ' contatti che l\'avevano la conservano') +
+             ' e la vedono nella scheda.' : ''))
+  } catch (e) {
+    console.warn('Attiva/disattiva categoria:', e)
+    mostraBanner('categorie-banner', 'err', 'Non modificata: ' + spiegaErrore(e))
+  }
+}
+
+async function aggiungiCategoria(event) {
+  if (event) event.preventDefault()
+  var nome = getVal('cat-nuovo-nome')
+  var id = slugCategoria(nome)
+  if (!nome) {
+    mostraBanner('categorie-banner', 'err', 'Scrivi il nome della categoria nuova.')
+    return false
+  }
+  if (!id) {
+    mostraBanner('categorie-banner', 'err', 'Il nome deve contenere almeno una lettera o una cifra: da lì si ricava l\'id.')
+    return false
+  }
+  // Mai sovrascrivere: se l'id c'è già (anche disattivato) si avvisa e basta.
+  var esistente = CATEGORIE.filter(function (c) { return c.k === id })[0]
+  if (esistente) {
+    mostraBanner('categorie-banner', 'warn', 'Esiste già una categoria con id «' + id + '»: «' + esistente.n + '»' +
+      (esistente.attiva ? '. Non la sovrascrivo: scegli un nome diverso.'
+                        : ', disattivata. Non la sovrascrivo: se è quella che cerchi, premi «Riattiva» nell\'elenco.'))
+    return false
+  }
+  var doppia = CATEGORIE.filter(function (c) { return normalizzaTesto(c.n) === normalizzaTesto(nome) })[0]
+  if (doppia) {
+    mostraBanner('categorie-banner', 'warn', 'C\'è già una categoria che si chiama «' + doppia.n + '»: scegli un nome diverso.')
+    return false
+  }
+  var ordine = CATEGORIE.reduce(function (m, c) { return c.ordine != null && c.ordine > m ? c.ordine : m }, 0) + 1
+  var btn = el('cat-aggiungi-btn')
+  if (btn) btn.disabled = true
+  try {
+    const { data, error } = await sb.from('rubrica_categorie')
+      .insert({ id: id, azienda_id: currentAziendaId, nome: nome, ordine: ordine, attiva: true })
+      .select('id, nome, ordine, attiva').single()
+    if (error) throw error
+    CATEGORIE.push(rigaCategoria(data))
+    ordinaCategorie()
+    setVal('cat-nuovo-nome', '')
+    aggiornaIdNuovaCategoria()
+    renderGestioneCategorie()
+    mostraBanner('categorie-banner', 'ok', 'Categoria «' + nome + '» aggiunta (id ' + id + '): è già fra i filtri e nelle spunte dei contatti.')
+  } catch (e) {
+    console.warn('Aggiungi categoria:', e)
+    if (e && (e.code === '23505' || /duplicate key|unique/i.test(String(e.message || '')))) {
+      mostraBanner('categorie-banner', 'warn', 'L\'id «' + id + '» esiste già nel database: non lo sovrascrivo. Scegli un nome diverso.')
+    } else {
+      mostraBanner('categorie-banner', 'err', 'Non aggiunta: ' + spiegaErrore(e))
+    }
+  } finally {
+    if (btn) btn.disabled = false
   }
   return false
 }
@@ -1083,7 +1575,7 @@ function spiegaErrore(e) {
   if (/tm_contatti_ha_un_nome/.test(m)) return 'serve almeno la ragione sociale oppure un nome.'
   if (/giorni_pagamento/.test(m) && /check/i.test(m)) return 'i giorni di pagamento non possono essere negativi.'
   if (/categoria/.test(m) && /check/i.test(m)) return 'categoria non ammessa dal database (controlla il vincolo su tm_contatti.categoria).'
-  if (/categorie/.test(m) && /check/i.test(m)) return 'una categoria scelta non è ammessa dal vincolo su tm_contatti.categorie: allinea il vincolo alle sette chiavi dell\'app.'
+  if (/categorie/.test(m) && /check/i.test(m)) return 'una categoria scelta non è ammessa dal vincolo su tm_contatti.categorie: allinea il vincolo agli id di rubrica_categorie.'
   if (/value too long/i.test(m)) return 'un campo è troppo lungo per il database (il paese, per esempio, deve essere il codice a due lettere).'
   if (/row-level security|violates row-level|permission denied/i.test(m)) {
     return 'il database ha rifiutato l\'operazione (regole di sicurezza). Rifai il login e riprova; se resta così, segnalalo.'
