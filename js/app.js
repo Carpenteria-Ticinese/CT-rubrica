@@ -12,7 +12,10 @@
 const SUPABASE_URL = 'https://wgidgbauhivdctdxfjnk.supabase.co'
 const SUPABASE_KEY = 'sb_publishable_Ke7MTQGHPYVXvKInfOrUQQ_Ys6qKJvD'
 const BUCKET_FOTO  = 'rubrica-foto'
-const APP_VERSIONE = 2
+const APP_VERSIONE = 3
+// Le foto si mostrano con link firmati e temporanei (il bucket diventa privato).
+const FOTO_VALIDITA_S = 3600              // un link firmato vale 1 ora
+const FOTO_RINNOVA_MS = 40 * 60 * 1000    // dopo 40 minuti se ne chiedono di nuovi
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
 
@@ -254,10 +257,11 @@ function stileAvatar(c) {
 
 function avatarHtml(c, grande) {
   var cls = 'avatar' + (grande ? ' grande' : '')
-  if (c.foto_url) {
-    // Se la foto non si carica (file cancellato, bucket privato) si torna alle iniziali.
+  var src = fotoSrc(c)
+  if (src) {
+    // Se la foto non si carica (file cancellato, link scaduto) si torna alle iniziali.
     return '<div class="' + cls + '" style="' + stileAvatar(c) + '">' +
-             '<img src="' + esc(c.foto_url) + '" alt="" loading="lazy"' +
+             '<img src="' + esc(src) + '" alt="" loading="lazy"' +
              ' onerror="this.parentNode.textContent=\'' + esc(iniziali(c)) + '\'" />' +
            '</div>'
   }
@@ -421,18 +425,43 @@ async function entraNellApp() {
     }
   } catch (e) {
     console.error('Avvio:', e)
-    mostraBanner('banner-globale', 'err', 'Non riesco a caricare la rubrica: ' + spiegaErrore(e))
+    mostraBanner('banner-globale', 'err',
+      e && e.perUtente ? e.message : 'Non riesco a caricare la rubrica: ' + spiegaErrore(e))
     html('lista-contatti', '')
   }
 }
 
 // L'azienda dell'utente: serve per scrivere (la policy RLS pretende un
 // azienda_id fra quelli dell'utente) e per leggere solo i contatti suoi.
+// Con la RLS una riga che l'utente non può leggere dà ZERO righe, senza errore:
+// qui zero righe non può essere giusto, quindi è un errore a schermo, scritto
+// per chi usa l'app (il dettaglio tecnico va nella console).
 async function loadAziendaId() {
-  const { data, error } = await sb.from('tm_utenti').select('azienda_id').eq('id', currentUser.id).single()
-  if (error) throw new Error('utente non collegato a nessuna azienda (tm_utenti): ' + error.message)
-  currentAziendaId = data ? data.azienda_id : null
-  if (!currentAziendaId) throw new Error('utente senza azienda in tm_utenti.')
+  const { data, error } = await sb.from('tm_utenti').select('azienda_id').eq('id', currentUser.id).maybeSingle()
+  if (error) {
+    // maybeSingle: più di una riga = errore PGRST116 («multiple rows»).
+    if (error.code === 'PGRST116' || /multiple|more than one|contain \d+ rows/i.test(String(error.message || '') + ' ' + String(error.details || ''))) {
+      console.error('tm_utenti: più righe per', currentUser.id, error)
+      throw erroreUtente('Il tuo utente è collegato alla ditta più di una volta: avvisa Umberto.')
+    }
+    throw new Error('non riesco a leggere il collegamento alla ditta (tm_utenti): ' + spiegaErrore(error))
+  }
+  if (!data) {
+    console.error('tm_utenti: nessuna riga leggibile per', currentUser.id, currentUser.email)
+    throw erroreUtente('Il tuo utente non è collegato alla ditta: avvisa Umberto.')
+  }
+  currentAziendaId = data.azienda_id || null
+  if (!currentAziendaId) {
+    console.error('tm_utenti: riga senza azienda_id per', currentUser.id)
+    throw erroreUtente('Il tuo utente non ha la ditta segnata: avvisa Umberto.')
+  }
+}
+
+// Un errore da mostrare così com'è (già scritto per chi usa l'app).
+function erroreUtente(testo) {
+  var e = new Error(testo)
+  e.perUtente = true
+  return e
 }
 
 // Le colonne che potrebbero non esserci ancora. `cellulare` arriva con
@@ -469,6 +498,7 @@ async function loadContatti() {
   contatti = (data || []).sort(function (a, b) {
     return contattoNome(a).localeCompare(contattoNome(b), 'it', { sensitivity: 'base' })
   })
+  await firmaFoto(contatti)
   return contatti
 }
 
@@ -969,7 +999,7 @@ function modificaContatto(id) {
   }
   el('modulo-titolo').textContent = contattoNome(c)
   el('modulo-salva-btn').textContent = 'Salva modifiche'
-  renderFotoAnteprima(c.foto_url ? { url: c.foto_url } : null, c)
+  renderFotoAnteprima(fotoSrc(c) ? { url: fotoSrc(c) } : null, c)
   aggiornaLinkRecapiti()
   mostraVista('modulo')
 }
@@ -1089,20 +1119,84 @@ function ridimensionaFoto(file, maxLato) {
 
 // Il percorso nel bucket è <id_contatto>/<timestamp>.<estensione>: mai il
 // nome del contatto, che può cambiare, avere accenti o essere uguale a un altro.
+// In tm_contatti.foto_url si salva SOLO il percorso (dalla versione 3): un URL
+// pubblico non servirebbe più, perché il bucket è privato.
 async function caricaFoto(contattoId, file) {
   var f = await ridimensionaFoto(file, 800)
   var path = contattoId + '/' + Date.now() + '.' + f.ext
   const { error } = await sb.storage.from(BUCKET_FOTO).upload(path, f.blob, { contentType: f.tipo, upsert: false })
   if (error) throw error
-  const { data } = sb.storage.from(BUCKET_FOTO).getPublicUrl(path)
-  return data.publicUrl
+  return path
 }
 
-// Dal foto_url salvato si ricava il percorso nel bucket, per cancellare il file.
+// Dal foto_url salvato si ricava il percorso nel bucket. Vale per:
+//  - il percorso solo                      «<id>/<n>.jpg»       (dalla versione 3)
+//  - l'URL pubblico delle versioni vecchie «…/object/public/rubrica-foto/<id>/<n>.jpg»
+//  - un URL firmato o autenticato          «…/object/sign/rubrica-foto/…?token=…»
+// Vuoto, rotto, o di un altro bucket/sito: null (si vedono le iniziali).
 function pathDaFotoUrl(url) {
-  var m = String(url || '').match(/\/object\/(?:public|sign|authenticated)\/rubrica-foto\/([^?#]+)/)
-  return m ? decodeURIComponent(m[1]) : null
+  var s = String(url == null ? '' : url).trim()
+  if (!s) return null
+  var p = null
+  var m = s.match(/\/object\/(?:public|sign|authenticated)\/rubrica-foto\/([^?#]+)/)
+  if (m) p = m[1]
+  else if (!/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^\/\//.test(s)) p = s.replace(/^\/+/, '').replace(/^rubrica-foto\//, '')
+  if (!p) return null
+  try { p = decodeURIComponent(p) } catch (_) { return null }
+  // Il percorso è sempre «cartella/file», senza «..» e senza parti vuote.
+  var pezzi = p.split('/')
+  if (pezzi.length < 2 || pezzi.some(function (x) { return !x || x === '.' || x === '..' })) return null
+  if (/[?#\\]/.test(p)) return null
+  return p
 }
+
+// ─── Link firmati per mostrare le foto ───────────────────────────────────────
+// Bucket privato: l'immagine si vede solo con un link firmato, che scade. Si
+// chiedono tutti insieme (createSignedUrls) a ogni lettura dei contatti, e si
+// rinnovano dopo 40 minuti. Funziona uguale con il bucket pubblico o privato.
+var fotoFirmate = {}        // percorso → link firmato
+var fotoFirmateQuando = 0   // quando sono stati chiesti (ms)
+
+function fotoSrc(c) {
+  var p = c ? pathDaFotoUrl(c.foto_url) : null
+  return p && fotoFirmate[p] ? fotoFirmate[p] : ''
+}
+
+async function firmaFoto(lista) {
+  var paths = []
+  ;(lista || []).forEach(function (c) {
+    var p = pathDaFotoUrl(c && c.foto_url)
+    if (p && paths.indexOf(p) < 0) paths.push(p)
+  })
+  if (!paths.length) { fotoFirmate = {}; fotoFirmateQuando = Date.now(); return }
+  try {
+    const { data, error } = await sb.storage.from(BUCKET_FOTO).createSignedUrls(paths, FOTO_VALIDITA_S)
+    if (error) throw error
+    var nuove = {}
+    ;(data || []).forEach(function (r, i) {
+      // signedUrl è l'indirizzo completo (signedURL della risposta è solo il pezzo finale).
+      if (r && !r.error && r.signedUrl) nuove[r.path || paths[i]] = r.signedUrl
+    })
+    fotoFirmate = nuove
+    fotoFirmateQuando = Date.now()
+  } catch (e) {
+    // Senza link firmati la rubrica funziona lo stesso: si vedono le iniziali.
+    console.warn('Foto: link firmati non creati:', e)
+  }
+}
+
+// Link vecchi di 40 minuti: se ne chiedono di nuovi (anche quando il telefono
+// si risveglia). Le foto già a schermo restano; le nuove usano i link nuovi.
+async function rinnovaFotoSeServe() {
+  if (!currentUser || !contatti.length) return
+  if (Date.now() - fotoFirmateQuando < FOTO_RINNOVA_MS) return
+  await firmaFoto(contatti)
+  if (vistaCorrente === 'lista') renderLista()
+}
+setInterval(function () { rinnovaFotoSeServe() }, 5 * 60 * 1000)
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') rinnovaFotoSeServe()
+})
 
 async function cancellaFotoFile(url) {
   var p = pathDaFotoUrl(url)

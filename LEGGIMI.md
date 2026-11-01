@@ -1,4 +1,3 @@
-[LEGGIMI.md](https://github.com/user-attachments/files/33421648/LEGGIMI.md)
 # CT Rubrica — leggimi
 
 Rubrica contatti di Carpenteria Ticinese. HTML/JS vanilla + Supabase, **stesso progetto
@@ -47,6 +46,12 @@ L'SQL non lo esegue il programma: Supabase → SQL Editor → incolla → Run.
   Un codice vecchio non valido viene mostrato come «da correggere», mai sostituito di nascosto.
 - **Foto**: ridotta a 800 px nel browser, caricata nel bucket `rubrica-foto` al percorso
   `<id_contatto>/<timestamp>.jpg`. Mai basata sul nome del contatto.
+  Dalla versione 3 in `tm_contatti.foto_url` si salva **solo il percorso**; le foto vecchie hanno
+  ancora l'URL pubblico e vanno bene lo stesso (`pathDaFotoUrl()` ricava il percorso da tutti e due).
+  Per mostrarle si chiedono **link firmati** da 1 ora (`createSignedUrls`), rinnovati dopo 40 minuti:
+  così funzionano con il bucket pubblico e con il bucket privato.
+- **Accesso**: serve la riga dell'utente in `tm_utenti` (con `azienda_id`) e poterla leggere.
+  Se non si legge (zero righe) la pagina dice «Il tuo utente non è collegato alla ditta: avvisa Umberto».
 - **Salvataggio**: se c'è già un contatto con nome molto simile (forme societarie, accenti e
   punteggiatura ignorate) o con lo stesso UID, si avvisa e si può **salvare comunque**. Mai un
   blocco: gli omonimi esistono, e lo stesso soggetto con due IBAN si registra due volte.
