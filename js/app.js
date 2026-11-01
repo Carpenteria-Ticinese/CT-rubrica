@@ -12,7 +12,7 @@
 const SUPABASE_URL = 'https://wgidgbauhivdctdxfjnk.supabase.co'
 const SUPABASE_KEY = 'sb_publishable_Ke7MTQGHPYVXvKInfOrUQQ_Ys6qKJvD'
 const BUCKET_FOTO  = 'rubrica-foto'
-const APP_VERSIONE = 3
+const APP_VERSIONE = 4
 // Le foto si mostrano con link firmati e temporanei (il bucket diventa privato).
 const FOTO_VALIDITA_S = 3600              // un link firmato vale 1 ora
 const FOTO_RINNOVA_MS = 40 * 60 * 1000    // dopo 40 minuti se ne chiedono di nuovi
@@ -446,15 +446,40 @@ async function loadAziendaId() {
     }
     throw new Error('non riesco a leggere il collegamento alla ditta (tm_utenti): ' + spiegaErrore(error))
   }
-  if (!data) {
-    console.error('tm_utenti: nessuna riga leggibile per', currentUser.id, currentUser.email)
-    throw erroreUtente('Il tuo utente non è collegato alla ditta: avvisa Umberto.')
+  if (data && data.azienda_id) {
+    currentAziendaId = data.azienda_id
+    return
   }
-  currentAziendaId = data.azienda_id || null
-  if (!currentAziendaId) {
-    console.error('tm_utenti: riga senza azienda_id per', currentUser.id)
-    throw erroreUtente('Il tuo utente non ha la ditta segnata: avvisa Umberto.')
+  // Zero righe (o riga senza azienda): il vice non legge tm_utenti (non ha
+  // tm_user_aziende). Si chiede l'azienda alla funzione rubrica_mia_azienda()
+  // (SQL URG_01b), che risponde solo a titolare e responsabile.
+  console.warn('tm_utenti: nessuna azienda leggibile per', currentUser.id, currentUser.email, '→ provo rubrica_mia_azienda()')
+  var az = await aziendaDaFunzione()
+  if (az) {
+    currentAziendaId = az
+    return
   }
+  console.error('Nessuna azienda per', currentUser.id, currentUser.email, '(tm_utenti e rubrica_mia_azienda vuoti)')
+  throw erroreUtente(data
+    ? 'Il tuo utente non ha la ditta segnata: avvisa Umberto.'
+    : 'Il tuo utente non è collegato alla ditta: avvisa Umberto.')
+}
+
+// L'azienda da rubrica_mia_azienda(). Vuoto se la funzione non c'è ancora
+// (prima dell'SQL URG_01b), se non dà niente (operaio, nessuna ditta) o se
+// l'utente non la può chiamare. Un errore di rete invece si mostra com'è.
+async function aziendaDaFunzione() {
+  const { data, error } = await sb.rpc('rubrica_mia_azienda')
+  if (error) {
+    var m = String(error.message || '') + ' ' + String(error.details || '') + ' ' + String(error.hint || '')
+    if (error.code === 'PGRST202' || error.code === '42883' || error.code === '42501' ||
+        /could not find the function|does not exist|permission denied/i.test(m)) {
+      console.warn('rubrica_mia_azienda non disponibile:', error)
+      return null
+    }
+    throw new Error('non riesco a leggere il collegamento alla ditta (rubrica_mia_azienda): ' + spiegaErrore(error))
+  }
+  return typeof data === 'string' && data ? data : null
 }
 
 // Un errore da mostrare così com'è (già scritto per chi usa l'app).
@@ -868,8 +893,20 @@ async function eliminaConfermato() {
   var nome = contattoNome(c)
   html('scheda-banner', '<div class="caricamento">Eliminazione…</div>')
   try {
-    const { error } = await sb.from('tm_contatti').delete().eq('id', id).eq('azienda_id', currentAziendaId)
+    // Con la RLS un «elimina» non permesso non dà errore: zero righe. Si chiede
+    // la riga indietro, così un successo finto non c'è mai (il vice non elimina).
+    const { data: tolti, error } = await sb.from('tm_contatti').delete().eq('id', id).eq('azienda_id', currentAziendaId).select('id')
     if (error) throw error
+    if (!tolti || !tolti.length) {
+      html('scheda-banner', bannerHtml('warn',
+        '<strong>Non eliminato:</strong> il tuo utente non può eliminare contatti (solo il titolare). ' +
+        'Puoi <strong>archiviarlo</strong>: sparisce dagli elenchi e si ritrova nel filtro «Archiviati».',
+        '<div class="banner-azioni">' +
+          '<button type="button" class="btn-primary" onclick="archiviaCorrente()">Archivia il contatto</button>' +
+          '<button type="button" class="btn-secondary" onclick="pulisciBanner(\'scheda-banner\')">Annulla</button>' +
+        '</div>'))
+      return
+    }
     await cancellaFotoContatto(id)   // best-effort: se fallisce resta un file orfano, non un problema
     await loadContatti()
     mostraVista('lista')

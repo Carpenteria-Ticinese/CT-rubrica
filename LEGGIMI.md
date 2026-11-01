@@ -50,8 +50,12 @@ L'SQL non lo esegue il programma: Supabase → SQL Editor → incolla → Run.
   ancora l'URL pubblico e vanno bene lo stesso (`pathDaFotoUrl()` ricava il percorso da tutti e due).
   Per mostrarle si chiedono **link firmati** da 1 ora (`createSignedUrls`), rinnovati dopo 40 minuti:
   così funzionano con il bucket pubblico e con il bucket privato.
-- **Accesso**: serve la riga dell'utente in `tm_utenti` (con `azienda_id`) e poterla leggere.
-  Se non si legge (zero righe) la pagina dice «Il tuo utente non è collegato alla ditta: avvisa Umberto».
+- **Accesso** (versione 4): l'azienda si legge da `tm_utenti`. Se dà zero righe (il vice non la
+  legge: non ha `tm_user_aziende`) si chiede `rpc('rubrica_mia_azienda')` (SQL URG_01b: risponde solo
+  a titolare e responsabile). Se anche quella è vuota o non c'è ancora, la pagina dice
+  «Il tuo utente non è collegato alla ditta: avvisa Umberto».
+- **Elimina**: il delete chiede la riga indietro. Zero righe (il vice non può eliminare) = «Non
+  eliminato», con il tasto «Archivia». Mai un successo finto.
 - **Salvataggio**: se c'è già un contatto con nome molto simile (forme societarie, accenti e
   punteggiatura ignorate) o con lo stesso UID, si avvisa e si può **salvare comunque**. Mai un
   blocco: gli omonimi esistono, e lo stesso soggetto con due IBAN si registra due volte.
