@@ -1,99 +1,83 @@
-# CT Rubrica — leggimi
+# Anagrafiche — leggimi
 
-Rubrica contatti di Carpenteria Ticinese. HTML/JS vanilla + Supabase, **stesso progetto
-Supabase e stessa tabella `tm_contatti` di Pre-contabilità**: un contatto salvato qui compare
-anche là, e viceversa. Si entra con **gli stessi email e password** di Pre-contabilità (Supabase
-Auth, `auth.users`): non esiste un secondo sistema di accesso.
+App unica per **Commesse**, **Persone** (con gli accessi) e **Contatti** di Carpenteria Ticinese Sagl.
+Prenderà il posto della Rubrica, **allo stesso indirizzo** (`carpenteria-ticinese.github.io/CT-rubrica/`):
+la card dell'Hub non si tocca. HTML/JS semplice + Supabase (stesso progetto delle altre app).
 
-## Cosa si carica su GitHub
+**Stato (2.11.2026): versione 2, NON online.** Commesse, Persone (con Esterni e Accessi) e Contatti pronti.
+Disegno e regole: `..\Anagrafiche - ricognizione\FASE2_DISEGNO.md`. Dove siamo: `STATO.md`.
 
-Repo: `Carpenteria-Ticinese/CT-rubrica`. I file, con il loro percorso nel repo, stanno in
-**`DA_CARICARE_SU_GITHUB.txt`**. Non spostarli e non rinominarli: i percorsi dentro il
-programma sono relativi.
+## È l'unica app che scrive
+`operai`, `operai_dati_personali`, `operai_contatti_emergenza`, `documenti_operai` (con l'App Cantieri, che
+scrive documenti senza file), `cantieri` (`stato_commessa`, `numero_commessa`, `tipo`, `cliente_id`,
+`codice_interno`, nome e indirizzo), `tm_contatti`. Gli accessi (`profili`, account) passano dalle funzioni
+lato server `crea-collaboratore`, `gestisci-accesso`, `cambia-ruolo` (dell'App Cantieri) e da `anag_collega_account`.
+**Non scrive mai** `cantieri.stato` dopo la creazione (è dell'App Cantieri) e non legge né scrive paghe (`tm_paghe_*`).
+
+## Chi entra
+Solo chi ha ruolo **titolare** o **responsabile** in `profili` (funzione `app_ruolo()`).
+`tm_utenti` non si legge più. Gli altri vedono «Anagrafiche è per il titolare e il responsabile».
+Contabilità: oggi solo il titolare, in nessun punto di Anagrafiche si apre ad altri.
+
+## Commesse (tabella `cantieri`)
+- Elenco con ricerca e filtri per stato (anche «Senza stato»); sezione **Interni** a parte.
+- `stato_commessa` si sceglie anche sulle commesse vecchie che non ce l'hanno (il Calendario lo legge).
+- Il **numero** lo dà il database (trigger). **Due padroni**: alla creazione `stato = 'Completato'`, poi mai più.
+- Interni riconosciuti da `tipo` e `codice_interno` (`magazzino`, `ditta`), **mai dal nome**.
+  L'interno `ditta` si mostra «Lavori per la ditta» (SQL ANAG_F2_05 cambia anche il nome nel database).
+- Il nome si blocca se ci sono foto. **Nessun tasto Elimina.**
+
+## Persone (tabella `operai`)
+- **Rapporto**: «Dipendente» (busta paga) o «Esterno» (lavora con la sua ditta, paghiamo la fattura) → `operai.rapporto`.
+  - Esterno: la **ditta** si sceglie dall'elenco dei contatti fornitori (o «Nuova ditta fornitore», che va nei
+    Contatti) → `operai.ditta_id`. Niente paga, **niente accesso** (il database impedisce `user_id` su un Esterno).
+  - `agenzia`/`nome_agenzia` (interinali) sono un'altra cosa: solo per i Dipendenti, non si toccano per gli Esterni.
+- Elenco: Dipendenti · Esterni (con la ditta) · «chi non lavora più con noi» (fine rapporto passata, chiuso).
+- Scheda: dati, **Accesso** (Dai accesso / Blocca / Sblocca / Nuova password / Cambia email / Cambia ruolo solo titolare),
+  **Dati personali** («Niente dati sanitari»), **Contatti d'emergenza** (con «Chiama»), **Documenti** (scadenze rosse/arancioni,
+  file nel bucket privato `tm-documenti`, percorso `<id persona>/<ora>-<nome>`, link firmato 5 minuti; toglie solo il titolare).
+- «Dai accesso»: salva l'email nella scheda → `anag_collega_account` → solo se serve `crea-collaboratore` → di nuovo
+  `anag_collega_account`. Mai un secondo account, anche se interrotto. Password scelta da chi crea (min. 8), mostrata una volta.
+- `attivo` non si scrive a mano. Nessun tasto «Elimina persona».
+
+## Contatti (tabella `tm_contatti`)
+- Elenco a lettere con «Chiama», ricerca, filtri Tutti / Fornitori / Clienti / Archiviati / categorie della Rubrica.
+- **Fornitore in un solo modo**: il tasto «Fornitore» = `e_fornitore` (SQL ANAG_F2_04 allinea anche `categoria` e `categorie`).
+- Archiviati: fuori dagli elenchi, si trovano cercando, «Rimetti fra gli attivi». «Elimina» solo titolare; se collegato
+  (commessa, Esterno, Pre-contabilità, Radar) il database rifiuta e si propone «Archivia».
+- Indirizzi `#contatto/<id>/fornitore` e `#nuovo-contatto-rubrica/fornitore`: per il tasto «Diventa fornitore» del Radar.
+- Foto e categorie si cambiano ancora nella Rubrica di riserva.
+
+## CAP ↔ località
+`js/cap.js` legge `dati/cap_ch.json` (elenco ufficiale swisstopo, salvato qui, **mai** chiesto a internet).
+Si crea con `node prove/converti_cap.js <AMTOVZ_CSV_LV95.csv>`. Senza il file l'app va lo stesso (si scrive a mano).
+Solo aiuto, mai blocco.
+
+## Sicurezza dei dati
+- Prima di **ogni** lettura e scrittura si controlla la sessione: senza sessione si torna al login.
+- Ogni scrittura chiede indietro la riga: **0 righe = «NON salvato»**, mai un successo finto.
+- Elenchi a zero righe dove non possono esserlo (commesse, persone, contatti) = errore a schermo.
+- Colonne nuove (SQL non ancora applicato): l'app lo dice e funziona con quelle vecchie (`AD.leggiConRiserva`).
+
+## SQL (in `..\Anagrafiche - ricognizione\SQL da eseguire\`, ognuno con `_INDIETRO` e `_VERIFICA`)
+`ANAG_F2_01_esterni` · `02_accessi_documenti` · `03_codice_interno` · `04_fornitore_unico` · `05_lavori_per_la_ditta` ·
+`06_foto_rubrica_scrittura` (toglie 2 policy: decide il Direttore). Il vecchio `SQL_FASE2_*` è in `scartati\`.
 
 ## Versioni
+JS e CSS con `?v=N` in `index.html`; a ogni modifica si alza `N` e `VERSIONE` in `js/config.js`. Dopo il caricamento: **Ctrl+F5**.
 
-Ogni file JS/CSS è richiamato con `?v=N` da `index.html` (`css/style.css?v=1`, `js/app.js?v=1`).
-Quando si cambia `app.js` o `style.css` si alza `N` in `index.html` (e `APP_VERSIONE` in
-`app.js`, che è quello che si legge in fondo alla pagina). `index.html` non ha `?v=`: **dopo
-ogni caricamento si apre con Ctrl+F5**.
+## Riserva
+`riserva/` = la Rubrica v4 online oggi (commit `d3f8e18`, uguale byte per byte, controllata il 2.11 con sha256).
+Si aggiorna solo con una versione provata, controllando l'impronta dopo ogni copia.
+**Se un giorno si aggiunge un service worker, deve ignorare `riserva/`.** Oggi non ce n'è.
 
-## SQL
-
-L'SQL non lo esegue il programma: Supabase → SQL Editor → incolla → Run.
-
-- `sql/da_applicare/SQL_RUBRICA_00_colonne.sql` — le colonne `categorie`, `foto_url`, `referente`
-  (già applicate; il file le aggiunge solo se mancano) e `cellulare`. Si può rilanciare.
-- `sql/da_applicare/SQL_RUBRICA_01_storage.sql` — **il bucket `rubrica-foto`** e le sue policy.
-  Va lanciato **prima della prima foto**: senza, il contatto si salva ma la foto no (il programma
-  lo dice a schermo).
-
-## Come funziona, in breve
-
-- **Elenco**: ricerca in tempo reale su nome, cognome, ragione sociale e referente, contatti
-  divisi per lettera (A, B, C…). I filtri sono le categorie attive di `rubrica_categorie`
-  (vedi sotto): un contatto compare in **ogni** categoria che ha spuntata. Sul telefono i
-  filtri scorrono di lato e il «nuovo contatto» è il pulsante tondo in basso a destra.
-  Il filtro «Archiviati» compare solo se ce ne sono.
-- **Scheda**: sotto il nome le azioni rapide (Cellulare, Chiama, WhatsApp, Email, Mappa).
-  WhatsApp usa il cellulare: un numero senza prefisso prende quello del paese del contatto
-  (CH, IT, DE, FR, AT, LI); per altri paesi il pulsante non compare. UID e IBAN si copiano con
-  un tocco. Su uno schermo largo almeno 1024 px la scheda si apre accanto all'elenco.
-- **Tema**: chiaro o scuro, segue l'impostazione del telefono.
-- **Telefono e cellulare** hanno un pulsante `tel:` accanto, sia in elenco sia nella scheda.
-- **Paese**: SOLO tendina, nel database va il codice ISO a due lettere (`CH`, `IT`, …). In
-  Pre-contabilità era testo libero e «Svizzera» digitato a mano diventava `SV` = El Salvador.
-  Un codice vecchio non valido viene mostrato come «da correggere», mai sostituito di nascosto.
-- **Foto**: ridotta a 800 px nel browser, caricata nel bucket `rubrica-foto` al percorso
-  `<id_contatto>/<timestamp>.jpg`. Mai basata sul nome del contatto.
-  Dalla versione 3 in `tm_contatti.foto_url` si salva **solo il percorso**; le foto vecchie hanno
-  ancora l'URL pubblico e vanno bene lo stesso (`pathDaFotoUrl()` ricava il percorso da tutti e due).
-  Per mostrarle si chiedono **link firmati** da 1 ora (`createSignedUrls`), rinnovati dopo 40 minuti:
-  così funzionano con il bucket pubblico e con il bucket privato.
-- **Accesso** (versione 4): l'azienda si legge da `tm_utenti`. Se dà zero righe (il vice non la
-  legge: non ha `tm_user_aziende`) si chiede `rpc('rubrica_mia_azienda')` (SQL URG_01b: risponde solo
-  a titolare e responsabile). Se anche quella è vuota o non c'è ancora, la pagina dice
-  «Il tuo utente non è collegato alla ditta: avvisa Umberto».
-- **Elimina**: il delete chiede la riga indietro. Zero righe (il vice non può eliminare) = «Non
-  eliminato», con il tasto «Archivia». Mai un successo finto.
-- **Salvataggio**: se c'è già un contatto con nome molto simile (forme societarie, accenti e
-  punteggiatura ignorate) o con lo stesso UID, si avvisa e si può **salvare comunque**. Mai un
-  blocco: gli omonimi esistono, e lo stesso soggetto con due IBAN si registra due volte.
-- **Eliminazione**: pulsante «Elimina» nella scheda, una conferma inline («Sì, elimina») e via.
-  Se il contatto è collegato a fatture o movimenti in Pre-contabilità il database rifiuta
-  (vincolo di chiave esterna): allora si propone di **archiviarlo**, come fa Pre-contabilità.
-
-## Le categorie: tabella `rubrica_categorie`
-
-Colonne `id`, `azienda_id`, `nome`, `ordine`, `attiva`. Il programma legge tutte le righe
-dell'azienda, ordinate per `ordine`; spunte e filtri mostrano solo quelle con `attiva = true`.
-In `tm_contatti.categorie` finisce l'**`id`**, mai il nome.
-
-Dal pulsante **Categorie** (icona etichetta in alto) si apre «Gestisci categorie»:
-
-- **Rinominare**: si cambia il nome dove sta e si preme «Salva nome» (o Invio; Esc annulla).
-  Cambia solo `nome`: i contatti già taggati restano agganciati e mostrano subito il nome nuovo.
-- **Aggiungere**: l'`id` si ricava dal nome («Geometri» → `geometri`, «Appalti presi» →
-  `appalti_presi`) e non cambia più. Se l'id esiste già, anche disattivato, il programma avvisa
-  e non sovrascrive niente.
-- **Disattivare**: `attiva = false`. La categoria sparisce da spunte e filtri, ma i contatti che
-  ce l'hanno la conservano: nella scheda compare tratteggiata, nel modulo resta spuntata con
-  «(disattivata)», e salvando non si perde. «Riattiva» la rimette. **Nessuna riga si cancella.**
-
-Il colore di ogni categoria non sta nella tabella: le categorie di partenza hanno colori
-scelti, le nuove lo ricavano dall'id (sempre lo stesso).
-
-## La categoria vecchia di Pre-contabilità
-
-`tm_contatti.categoria` (una sola: cliente / fornitore / collaboratore / generico) resta per
-Pre-contabilità. CT Rubrica la tiene allineata alle categorie nuove quando salva:
-preventivi e appalti → `cliente`, fornitori → `fornitore`, collaboratori → `collaboratore`
-(e `e_cliente` / `e_fornitore` quando un contatto è tutte e due le cose). Un contatto che
-Pre-contabilità dice «cliente» ma che qui non ha ancora categorie compare senza etichetta:
-aprendolo in modifica un avviso invita a spuntare Preventivi o Appalti.
-
-## Colonne facoltative
-
-`cellulare` (SQL_FASE29 di Pre-contabilità) ed `e_cliente`/`e_fornitore` (SQL_FASE17): il
-programma controlla all'avvio se ci sono. Se `cellulare` manca, il campo si nasconde e tutto il
-resto funziona.
+## Prove (senza toccare il database vero)
+- `prove/finto_supabase.js`: Supabase finto con dati **inventati** («PROVA …»), imita trigger, vincoli, funzioni, file.
+- `node prove/prepara_prova.js` crea `prove/prova.html` da `index.html`. Server locale nella cartella `Anagrafiche`
+  (es. `python -m http.server 8766`) → `http://localhost:8766/prove/prova.html`. Password di prova: `prova`.
+- Parametri: `?ruolo=operaio|responsabile`, `?sessione=no`, `?rpc=errore`, `?lettura=vuota`, `?scrittura=zero`,
+  `?foto=errore`, `?sql=vecchio` (database senza gli SQL ANAG_F2), `?funzioni=assenti`.
+- Prove automatiche nel browser (console della pagina di prova appena caricata):
+  `prove/test_persone.js` → `await TEST_PERSONE()`, `prove/test_contatti.js` → `await TEST_CONTATTI()`.
+- `prove/dati/cap_ch.json` = poche righe di prova per il CAP.
+- **La cartella `prove/` non va caricata su GitHub.**

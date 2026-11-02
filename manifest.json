@@ -1,0 +1,15 @@
+{
+  "name": "Anagrafiche — Carpenteria Ticinese",
+  "short_name": "Anagrafiche",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef1f5",
+  "theme_color": "#1d4e89",
+  "lang": "it",
+  "icons": [
+    { "src": "icone/icona-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icone/icona-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icone/icona.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
