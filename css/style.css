@@ -330,3 +330,23 @@ label.btn:focus-within { outline: 3px solid var(--primary); outline-offset: 2px;
 .cat-spenta { color: var(--text3); font-size: 16px; }
 .campo-nuova-cat { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 #kt-cat-aiuto { font-size: 16px; margin: 4px 0 6px; }
+
+/* ── v7: Cancella, Archivia, Registro, Categorie ──────────────────────────── */
+.btn-pericolo { background: #b91c1c; color: #fff; }         /* rosso con la scritta «Cancella»: mai solo colore */
+.btn-pericolo:hover { background: #991b1b; }
+.vela-lunga { align-items: flex-start; overflow-y: auto; }
+.vela-lunga .vela-scatola { margin: auto 0; max-width: 520px; }
+.cx-lista { margin: 6px 0 12px; padding-left: 22px; }
+.cx-lista li { margin: 4px 0; }
+.cx-lista .dato-sotto { display: block; }
+.cx-sottotitolo { font-size: 18px; margin: 14px 0 4px; }
+.cx-campo { margin-top: 14px; }
+.cx-azioni { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 10px; }
+.cx-azioni .btn { padding-left: 8px; padding-right: 8px; }
+.cx-azioni .btn:only-child { grid-column: 1 / 3; }
+.cx-dettagli { margin-top: 8px; }
+.cx-dettagli summary { min-height: 48px; display: flex; align-items: center; font-weight: 600; color: var(--primary); cursor: pointer; }
+.cat-riga { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.cat-riga:last-child { border-bottom: 0; }
+.cat-riga .azioni-riga { margin-top: 8px; }
+.cat-meta { font-size: 16px; color: var(--text2); margin-top: 4px; }

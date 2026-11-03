@@ -43,6 +43,22 @@ var AD = (function () {
     if (r.error) throw errore('Accesso non riuscito', r.error)
     return r.data.session
   }
+  // Riconferma della password (v7, prima di cancellare): stesso login, stessa email della sessione.
+  // true = giusta · false = sbagliata (la sessione resta quella di prima) · eccezione = non si è potuto controllare.
+  // La password passa solo da qui: non si salva, non si scrive nei messaggi, chi chiama svuota il campo.
+  async function verificaPassword(password) {
+    var s = await richiediSessione()
+    var r = await sb.auth.signInWithPassword({ email: s.user.email, password: password })
+    if (r.error) {
+      var m = String(r.error.message || '')
+      if (/invalid login|invalid_credentials/i.test(m) || r.error.code === 'invalid_credentials') return false
+      if (r.error.status === 429 || /rate limit|too many/i.test(m)) throw new Error('troppi tentativi: aspetta qualche minuto e riprova.')
+      throw new Error('non riesco a controllare la password (' + m + ').')
+    }
+    var u = r.data && (r.data.user || (r.data.session && r.data.session.user))
+    if (!u || u.id !== s.user.id) throw new Error('il controllo della password ha risposto con un altro utente: esci e rientra.')
+    return true
+  }
   async function esci() { try { await sb.auth.signOut({ scope: 'local' }) } catch (_) { /* si esce comunque */ } }
 
   // Il ruolo dal database (profili, via app_ruolo). Senza profilo app_ruolo dice
@@ -71,9 +87,9 @@ var AD = (function () {
   }
 
   // Quante righe (senza leggerle). Errore = eccezione, mai «0».
-  async function conta(tabella, filtro) {
+  async function conta(tabella, filtro, colonna) {
     await richiediSessione()
-    var q = sb.from(tabella).select('id', { count: 'exact', head: true })
+    var q = sb.from(tabella).select(colonna || 'id', { count: 'exact', head: true })
     if (filtro) q = filtro(q)
     var r = await q
     if (r.error) throw errore('Conteggio ' + tabella, r.error)
@@ -130,7 +146,7 @@ var AD = (function () {
     return r.data[0]
   }
 
-  // Cancellare: SOLO dove è previsto (contatti d'emergenza, documenti del titolare).
+  // Cancellare: contatti d'emergenza, documenti (titolare) e, passando da js/cancella.js, persone, commesse, contatti (titolare).
   // 0 righe = non cancellato (la RLS nega in silenzio): mai un successo finto.
   async function cancella(tabella, id) {
     await richiediSessione()
@@ -181,18 +197,22 @@ var AD = (function () {
   async function togliFile(bucket, percorso) {
     try { await sb.storage.from(bucket).remove([percorso]) } catch (_) { /* resta un file senza riga: non è un danno */ }
   }
-  // Tutti i file di una cartella (per es. le foto di un contatto appena eliminato). Se non riesce,
-  // restano file senza contatto: non è un danno, e il database li lascia togliere (cartelle orfane).
+  // Tutti i file di una cartella (per es. le foto di un contatto cancellato). Non lancia mai: dice com'è andata.
+  // Il database può negare in silenzio (0 tolti senza errore): per questo si contano.
   async function togliCartella(bucket, cartella) {
     try {
-      var r = await sb.storage.from(bucket).list(cartella)
+      var r = await sb.storage.from(bucket).list(cartella, { limit: 1000 })
+      if (r && r.error) return { file: 0, tolti: 0, errore: r.error.message || 'lettura non riuscita' }
       var p = ((r && r.data) || []).map(function (f) { return cartella + '/' + f.name })
-      if (p.length) await sb.storage.from(bucket).remove(p)
-    } catch (_) { /* come sopra */ }
+      if (!p.length) return { file: 0, tolti: 0 }
+      var x = await sb.storage.from(bucket).remove(p)
+      if (x && x.error) return { file: p.length, tolti: 0, errore: x.error.message || 'non tolti' }
+      return { file: p.length, tolti: ((x && x.data) || []).length }
+    } catch (e) { return { file: 0, tolti: 0, errore: e.message } }
   }
 
   return {
-    sb: sb, sessione: sessione, richiediSessione: richiediSessione, entra: entra, esci: esci, ruolo: ruolo,
+    sb: sb, sessione: sessione, richiediSessione: richiediSessione, entra: entra, esci: esci, ruolo: ruolo, verificaPassword: verificaPassword,
     leggi: leggi, conta: conta, inserisci: inserisci, aggiorna: aggiorna,
     colonnaMancante: colonnaMancante, leggiConRiserva: leggiConRiserva, aggiornaDove: aggiornaDove, upsert: upsert,
     cancella: cancella, rpc: rpc, funzione: funzione, caricaFile: caricaFile, linkFirmato: linkFirmato, togliFile: togliFile, togliCartella: togliCartella

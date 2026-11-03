@@ -26,6 +26,8 @@ var APP = (function () {
   function mostraLogin(messaggio, tipo) {
     utente = null
     CM.svuota(); PS.svuota(); if (window.KT) KT.svuota()
+    if (window.CX) CX.chiudiSubito()
+    var mr = el('menu-registro'); if (mr) mr.hidden = true
     el('pane-elenco').innerHTML = ''; el('pane-dettaglio').innerHTML = ''
     mostraPagina('login')
     el('login-avviso').innerHTML = messaggio ? AC.avviso(tipo || 'info', esc(messaggio)) : ''
@@ -72,6 +74,7 @@ var APP = (function () {
         'Per i cantieri usa l\'App Cantieri.')
       return
     }
+    el('menu-registro').hidden = utente.ruolo !== 'titolare'   // il Registro cancellazioni lo vede solo il titolare
     el('utente').innerHTML = esc(utente.email) + ' <span class="ruolo">' + esc(utente.ruolo) + '</span>'
     mostraPagina('app')
     vai()
@@ -103,7 +106,9 @@ var APP = (function () {
     'nuova-persona': { titolo: 'Persone', menu: 'persone' },
     contatti: { titolo: 'Contatti', menu: 'contatti' },
     contatto: { titolo: 'Contatti', menu: 'contatti' },
-    'nuovo-contatto-rubrica': { titolo: 'Contatti', menu: 'contatti' }
+    'nuovo-contatto-rubrica': { titolo: 'Contatti', menu: 'contatti' },
+    categorie: { titolo: 'Contatti', menu: 'contatti' },
+    registro: { titolo: 'Registro cancellazioni', menu: 'registro' }
   }
   async function vai() {
     if (!utente) return
@@ -119,7 +124,8 @@ var APP = (function () {
     document.body.classList.remove('con-dettaglio')
     try {
       try {
-        if (sez.menu === 'commesse') return await CM.mostra(parti)
+        if (sez.menu === 'commesse') return await CM.mostra(parti, utente)
+        if (sez.menu === 'registro') return await CX.mostraRegistro(utente)
         if (sez.menu === 'persone') return await PS.mostra(parti, utente)
         if (sez.menu === 'contatti') {
           if (window.KT) return await KT.mostra(parti, utente)
@@ -248,14 +254,17 @@ var APP = (function () {
       var v = el('vela-uscita')
       if (ev.key === 'Escape' && v && !v.hidden) { ev.preventDefault(); chiudiVela() }
     })
-    CM.avvia(); PS.avvia(); if (window.KT) KT.avvia()
+    CM.avvia(); PS.avvia(); if (window.KT) KT.avvia(); CX.avvia()
     AD.sb.auth.onAuthStateChange(function (evento) {
       if (evento === 'SIGNED_OUT' && utente) mostraLogin('Sessione chiusa: entra di nuovo.', 'warn')
     })
     dopoLogin().catch(function (e) { mostraLogin('Errore all\'avvio: ' + e.message, 'err') })
   }
 
-  return { avvia: avvia, sessioneScaduta: sessioneScaduta, libera: libera, livello: livello, chiudiLivello: chiudiLivello,
+  // La schermata è stata ridisegnata dopo un salvataggio (v7, categorie): da qui si riparte a confrontare.
+  function rifirma() { snap = firma() }
+
+  return { avvia: avvia, sessioneScaduta: sessioneScaduta, libera: libera, livello: livello, chiudiLivello: chiudiLivello, rifirma: rifirma,
            // per le prove
            _sporco: sporco, _pos: function () { return pos } }
 })()

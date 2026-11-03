@@ -6,17 +6,17 @@
   <title>Anagrafiche · Carpenteria Ticinese</title>
   <meta name="theme-color" content="#6a3fa0">
   <meta name="apple-mobile-web-app-title" content="Anagrafiche">
-  <link rel="icon" type="image/png" sizes="32x32" href="icone/icona-32.png?v=6">
-  <link rel="apple-touch-icon" href="icone/icona-180.png?v=6">
-  <link rel="manifest" href="manifest.json?v=6">
-  <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="icon" type="image/png" sizes="32x32" href="icone/icona-32.png?v=7">
+  <link rel="apple-touch-icon" href="icone/icona-180.png?v=7">
+  <link rel="manifest" href="manifest.json?v=7">
+  <link rel="stylesheet" href="css/style.css?v=7">
 </head>
 <body>
 
 <!-- ── Login ───────────────────────────────────────────────────────────── -->
 <main id="pagina-login" class="pagina-centrata" hidden>
   <form id="login-form" class="scatola" novalidate>
-    <img src="icone/icona.svg?v=6" alt="" class="logo-login" width="72" height="72">
+    <img src="icone/icona.svg?v=7" alt="" class="logo-login" width="72" height="72">
     <div class="ditta">Carpenteria Ticinese</div>
     <h1>Anagrafiche</h1>
     <p class="nota">Entra con la stessa email e password delle altre app.</p>
@@ -43,7 +43,7 @@
 <div id="pagina-app" hidden>
   <header class="testata">
     <div class="testata-testo">
-      <div class="ditta"><img src="icone/icona-32.png?v=6" alt="" class="logo-testata" width="24" height="24"><span>Anagrafiche</span></div>
+      <div class="ditta"><img src="icone/icona-32.png?v=7" alt="" class="logo-testata" width="24" height="24"><span>Anagrafiche</span></div>
       <h1 id="titolo-sezione">Commesse</h1>
     </div>
     <div class="testata-utente">
@@ -56,6 +56,7 @@
     <a href="#commesse" class="menu-voce" data-menu="commesse" data-ico="commesse"><span>Commesse</span></a>
     <a href="#persone" class="menu-voce" data-menu="persone" data-ico="persone"><span>Persone</span></a>
     <a href="#contatti" class="menu-voce" data-menu="contatti" data-ico="contatti"><span>Contatti</span></a>
+    <a href="#registro" id="menu-registro" class="menu-voce" data-menu="registro" data-ico="documento" hidden><span>Registro</span></a>
   </nav>
 
   <main class="contenuto">
@@ -78,14 +79,20 @@
   </div>
 </div>
 
+<!-- ── Finestra «Cancella» e «Archivia» (js/cancella.js): fuori dalla scheda, Indietro la chiude ─── -->
+<div id="vela-cancella" class="vela vela-lunga" hidden>
+  <div id="cx-scatola" class="vela-scatola" role="dialog" aria-modal="true" aria-labelledby="cx-titolo"></div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="js/config.js?v=6"></script>
-<script src="js/comune.js?v=6"></script>
-<script src="js/dati.js?v=6"></script>
-<script src="js/cap.js?v=6"></script>
-<script src="js/commesse.js?v=6"></script>
-<script src="js/persone.js?v=6"></script>
-<script src="js/contatti.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<script src="js/config.js?v=7"></script>
+<script src="js/comune.js?v=7"></script>
+<script src="js/dati.js?v=7"></script>
+<script src="js/cap.js?v=7"></script>
+<script src="js/cancella.js?v=7"></script>
+<script src="js/commesse.js?v=7"></script>
+<script src="js/persone.js?v=7"></script>
+<script src="js/contatti.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 </body>
 </html>

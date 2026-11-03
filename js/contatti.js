@@ -6,16 +6,18 @@
      (SQL ANAG_F2_04 tiene allineati anche categoria e categorie per le app vecchie).
    - Archiviati (attivo = false): non negli elenchi; compaiono nella ricerca e nel
      filtro «Archiviati», con la scritta e «Rimetti fra gli attivi».
-   - Niente si cancella, tranne: «Elimina» solo per il titolare, e il database
-     rifiuta se il contatto è collegato (commessa, Esterno, Pre-contabilità, Radar):
-     allora si propone «Archivia».
+   - «Archivia» = attivo false, i dati restano. «Cancella» (v7): solo il titolare, con password, avviso e registro
+     (js/cancella.js); se il contatto è collegato (commessa, Esterno, Contabilità, Acquisti, Preventivi) il database
+     rifiuta: si spiega cosa blocca e si propone «Archivia invece».
    - Omonimi: avviso, mai blocco. CAP ↔ località: aiuto, mai blocco.
    - Categorie multiple (rubrica_categorie) come nella Rubrica: si assegnano e si tolgono nel modulo,
      si crea una categoria nuova (la tabella permette leggere/aggiungere/modificare, mai cancellare).
+     v7: «Gestisci categorie» (#categorie) rinomina e disattiva: tocca solo nome e attiva, l'id non cambia mai;
+     «fornitori» non si rinomina né disattiva.
      «Fornitori» NON si sceglie dalle categorie: c'è solo il tasto «Fornitore» (e_fornitore, ANAG_F2_04).
    - Foto (v6): bucket privato rubrica-foto, percorso <id contatto>/<ora>.<est>, in tm_contatti.foto_url
      solo il percorso; si vede con link firmato (1 ora). Si carica / cambia / toglie nel modulo, al «Salva».
-     Contatto eliminato = anche le sue foto (best-effort).
+     Contatto cancellato = anche le sue foto (se non riesce, lo dice).
    - azienda_id non si manda: la mette il database (trigger anag_contatti_azienda).
    ═══════════════════════════════════════════════════════════════════════════ */
 var KT = (function () {
@@ -228,6 +230,7 @@ var KT = (function () {
       return '<button type="button" class="filtro' + (ST.filtro === f.k ? ' filtro-attivo' : '') + '" data-kt-filtro="' + esc(f.k) + '" aria-pressed="' + (ST.filtro === f.k) + '">' + esc(f.n) + '</button>'
     }).join('') + '</div>'
     if (ST.catErrore) h += AC.avviso('warn', 'Categorie non leggibili: ' + esc(ST.catErrore))
+    if (!ST.catErrore) h += '<div class="azioni-riga"><a class="btn btn-secondario btn-piccolo" id="kt-gestisci-cat" href="#categorie">' + ico('modifica') + '<span>Gestisci categorie</span></a></div>'
     h += '<p class="nota">' + lista.length + ' contatti' + (ST.cerca ? ' trovati' : '') + (ST.filtro !== 'archiviati' && !ST.cerca ? ' (gli archiviati si trovano cercando)' : '') + '</p>'
     var lettera = '', righe = ''
     lista.forEach(function (k) {
@@ -287,8 +290,8 @@ var KT = (function () {
         col.esterni.map(function (o) { return dato('Ditta dell\'Esterno', '<a href="#persona/' + esc(o.id) + '">' + esc([o.nome, o.cognome].join(' ')) + '</a>') }).join('') + '</div>'
     }
     h += '<div class="blocco blocco-tenue" id="kt-fine">' +
-      (k.attivo !== false ? '<button type="button" class="btn btn-secondario" data-kt-azione="archivia">' + ico('lucchetto') + '<span>Archivia</span></button>' : '') +
-      (ST.utente && ST.utente.ruolo === 'titolare' ? ' <button type="button" class="btn btn-secondario" data-kt-azione="elimina">' + ico('togli') + '<span>Elimina</span></button>' : '') + '</div>'
+      (k.attivo !== false ? '<button type="button" class="btn btn-primario" data-kt-azione="archivia">' + ico('lucchetto') + '<span>Archivia</span></button>' : '') +
+      (ST.utente && ST.utente.ruolo === 'titolare' ? ' <button type="button" class="btn btn-pericolo" data-kt-azione="cancella">' + ico('togli') + '<span>Cancella</span></button>' : '') + '</div>'
     pane.innerHTML = h
     mostraFoto(k)
   }
@@ -383,7 +386,7 @@ var KT = (function () {
     if (!id) return msgCat('err', 'Il nome deve avere almeno una lettera o una cifra.')
     var stessoId = cats.filter(function (c) { return c.id === id })[0]
     if (stessoId) {
-      return msgCat('warn', 'C\'è già «' + esc(stessoId.nome) + '»' + (stessoId.attiva === false ? ', ma è disattivata (si riattiva dalla Rubrica di riserva)' : ': la trovi nell\'elenco qui sopra') + '. Non la creo due volte.')
+      return msgCat('warn', 'C\'è già «' + esc(stessoId.nome) + '»' + (stessoId.attiva === false ? ', ma è disattivata (si riattiva da «Gestisci categorie»)' : ': la trovi nell\'elenco qui sopra') + '. Non la creo due volte.')
     }
     var stessoNome = cats.filter(function (c) { return AC.normale(c.nome) === AC.normale(nomeNuovo) })[0]
     if (stessoNome) return msgCat('warn', 'C\'è già una categoria che si chiama «' + esc(stessoNome.nome) + '». Scegli un nome diverso.')
@@ -400,7 +403,8 @@ var KT = (function () {
       disegnaChipCategorie(sel)
       inp.value = ''
       disegnaElenco(aperto)
-      msgCat('ok', 'Categoria <strong>' + esc(nomeNuovo) + '</strong> creata e spuntata. Va sul contatto quando premi «Salva».')
+      if (el('kt-gestione')) disegnaCategorie()
+      msgCat('ok', el('kt-gestione') ? 'Categoria <strong>' + esc(nomeNuovo) + '</strong> creata.' : 'Categoria <strong>' + esc(nomeNuovo) + '</strong> creata e spuntata. Va sul contatto quando premi «Salva».')
     } catch (e) {
       if (e.sessioneAssente) return APP.sessioneScaduta()
       var m = String(e.message || e)
@@ -438,7 +442,7 @@ var KT = (function () {
       (ST.categorie ? '<div class="campo campo-nuova-cat" id="campo-kt-cat-nuova"><label for="kt-cat-nuova">Una categoria che non c\'è? Creala</label>' +
         '<div class="riga-aggiungi"><input id="kt-cat-nuova" type="text" maxlength="60" autocomplete="off" placeholder="Es. Geometri">' +
         '<button type="button" class="btn btn-secondario" data-kt-azione="cat-crea">' + ico('piu') + '<span>Aggiungi categoria</span></button></div>' +
-        '<div class="campo-aiuto">La vedono tutti i contatti. Per rinominarla o disattivarla c\'è ancora la <a href="riserva/">Rubrica di riserva</a>.</div></div>' : '') +
+        '<div class="campo-aiuto">La vedono tutti i contatti. Per rinominarla o disattivarla: <a href="#categorie">Gestisci categorie</a>.</div></div>' : '') +
       '<div id="kt-cat-msg"></div></fieldset></div>'
     h += '<div class="blocco"><h3 class="blocco-titolo">Recapiti</h3>' +
       campo('kt-cellulare', 'Cellulare', inp('kt-cellulare', f.cellulare, ' inputmode="tel" maxlength="40"')) +
@@ -585,7 +589,89 @@ var KT = (function () {
     return m
   }
 
-  // ── Archivia / Rimetti / Elimina ──────────────────────────────────────────
+  // ── Gestisci categorie (v7) ───────────────────────────────────────────────
+  // Rinomina = solo nome; disattiva = solo attiva. L'id è la chiave scritta sui contatti: non cambia mai.
+  // «fornitori» è il tasto Fornitore: non si rinomina né si disattiva (si guarda l'id, non il nome).
+  function contaConCategoria(id) {
+    if (id === 'fornitori') return ST.contatti.filter(AC.eFornitore).length
+    return ST.contatti.filter(function (k) { return categorieDi(k).indexOf(id) >= 0 }).length
+  }
+  function paroleContatti(n) { return n === 1 ? '1 contatto' : n + ' contatti' }
+  function disegnaCategorie() {
+    var pane = el('pane-dettaglio')
+    var h = '<div id="kt-gestione">' + testata('Gestisci categorie', '', '', '#contatti')
+    if (!ST.categorie) {
+      pane.innerHTML = h + AC.avviso('err', '<strong>Non riesco a leggere le categorie.</strong> ' + esc(ST.catErrore || '')) + '</div>'
+      return
+    }
+    h += '<p class="nota">Il nome cambia dappertutto, i contatti restano agganciati. Disattivare: non si offre più ai contatti, chi ce l\'ha la tiene.</p><div id="kt-cat-msg"></div><div class="blocco">'
+    h += ST.categorie.map(function (c) {
+      var n = contaConCategoria(c.id)
+      if (c.id === 'fornitori') {
+        return '<div class="cat-riga" data-cat-riga="fornitori"><strong>' + esc(c.nome) + '</strong><div class="cat-meta">' + paroleContatti(n) +
+          ' · non si rinomina né si disattiva: è il tasto «Fornitore» del contatto.</div></div>'
+      }
+      return '<div class="cat-riga" data-cat-riga="' + esc(c.id) + '"><label for="kt-catn-' + esc(c.id) + '" class="nascosto">Nome della categoria</label>' +
+        '<input id="kt-catn-' + esc(c.id) + '" data-cat-nome="' + esc(c.id) + '" type="text" maxlength="60" autocomplete="off" value="' + esc(c.nome) + '">' +
+        '<div class="cat-meta">' + paroleContatti(n) + (c.attiva === false ? ' · <span class="cat-spenta">disattivata</span>' : '') + '</div>' +
+        '<div class="azioni-riga"><button type="button" class="btn btn-secondario btn-piccolo" data-kt-azione="cat-rinomina" data-cat="' + esc(c.id) + '">' + ico('salva') + '<span>Salva nome</span></button>' +
+        (c.attiva === false
+          ? '<button type="button" class="btn btn-secondario btn-piccolo" data-kt-azione="cat-riattiva" data-cat="' + esc(c.id) + '">' + ico('ok') + '<span>Riattiva</span></button>'
+          : '<button type="button" class="btn btn-secondario btn-piccolo" data-kt-azione="cat-disattiva" data-cat="' + esc(c.id) + '">' + ico('chiudi') + '<span>Disattiva</span></button>') +
+        '</div></div>'
+    }).join('')
+    h += '</div><div class="blocco"><div class="campo" id="campo-kt-cat-nuova"><label for="kt-cat-nuova">Categoria nuova</label>' +
+      '<div class="riga-aggiungi"><input id="kt-cat-nuova" type="text" maxlength="60" autocomplete="off" placeholder="Es. Geometri">' +
+      '<button type="button" class="btn btn-secondario" data-kt-azione="cat-crea">' + ico('piu') + '<span>Aggiungi categoria</span></button></div></div></div></div>'
+    pane.innerHTML = h
+    pane.querySelectorAll('[data-cat-nome]').forEach(function (i) {
+      i.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); rinominaCategoria(i.dataset.catNome) } })
+    })
+    var cn = el('kt-cat-nuova'); if (cn) cn.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); creaCategoria() } })
+    APP.rifirma()
+  }
+  function categoriaDa(id) { return (ST.categorie || []).filter(function (c) { return c.id === id })[0] || null }
+  // 0 righe = la RLS ha negato in silenzio: aggiornaDove lo fa diventare un errore.
+  async function scriviCategoria(c, campi) {
+    var r = await AD.aggiornaDove('rubrica_categorie', function (q) { return q.eq('id', c.id).eq('azienda_id', c.azienda_id) }, campi, 'id,nome,ordine,attiva,azienda_id')
+    ST.categorie = ST.categorie.map(function (x) { return x.id === r.id ? r : x })
+    return r
+  }
+  function erroreCategoria(cosa, e) {
+    if (e.sessioneAssente) return APP.sessioneScaduta()
+    var m = String(e.message || e)
+    msgCat('err', '<strong>' + cosa + '</strong> ' + (/row-level|permission denied|0 righe/i.test(m) ? 'il database non ti dà il permesso.' : esc(m)))
+  }
+  async function rinominaCategoria(id) {
+    var c = categoriaDa(id), inp = el('kt-catn-' + id)
+    if (!c || !inp || id === 'fornitori') return
+    var nuovo = inp.value.trim().replace(/\s+/g, ' ')
+    if (!nuovo) { inp.value = c.nome; return msgCat('err', 'Il nome non può essere vuoto.') }
+    if (nuovo === c.nome) return msgCat('info', 'Il nome è già «' + esc(nuovo) + '»: niente da salvare.')
+    var doppia = ST.categorie.filter(function (x) { return x.id !== id && AC.normale(x.nome) === AC.normale(nuovo) })[0]
+    if (doppia) return msgCat('warn', 'C\'è già una categoria che si chiama «' + esc(doppia.nome) + '»' + (doppia.attiva === false ? ' (disattivata)' : '') + ': scegli un nome diverso.')
+    var vecchio = c.nome
+    try {
+      await scriviCategoria(c, { nome: nuovo })
+      var n = contaConCategoria(id)
+      disegnaElenco(aperto); disegnaCategorie()
+      msgCat('ok', 'Rinominata: «' + esc(vecchio) + '» → «' + esc(nuovo) + '». ' + (n ? paroleContatti(n) + ' la mostra' + (n === 1 ? '' : 'no') + ' già col nome nuovo.' : 'Nessun contatto la usa ancora.'))
+    } catch (e) { erroreCategoria('Non rinominata:', e) }
+  }
+  async function attivaCategoria(id, attiva) {
+    var c = categoriaDa(id)
+    if (!c || id === 'fornitori') return
+    try {
+      var r = await scriviCategoria(c, { attiva: attiva })
+      if (!attiva && ST.filtro === 'cat:' + id) ST.filtro = 'tutti'
+      var n = contaConCategoria(id)
+      disegnaElenco(aperto); disegnaCategorie()
+      msgCat('ok', attiva ? '«' + esc(r.nome) + '» è di nuovo attiva: torna fra i filtri e nelle spunte.'
+        : '«' + esc(r.nome) + '» disattivata: non si offre più ai contatti.' + (n ? ' ' + paroleContatti(n) + ' la tiene' + (n === 1 ? '' : 'no') + '.' : ''))
+    } catch (e) { erroreCategoria('Non modificata:', e) }
+  }
+
+  // ── Archivia / Rimetti / Cancella ─────────────────────────────────────────
   async function archivia(id, attivo) {
     try {
       var k = await AD.aggiorna('tm_contatti', id, { attivo: attivo }, COL)
@@ -598,33 +684,15 @@ var KT = (function () {
       el('kt-fine').innerHTML = AC.avviso('err', 'NON salvato: ' + esc(spiega(e)))
     }
   }
-  function chiediElimina(id) {
-    var k = perId(id), col = collegamenti(k)
-    var box = el('kt-fine')
-    if (col.commesse.length || col.esterni.length) {
-      box.innerHTML = AC.avviso('warn', '<strong>Non si può eliminare:</strong> ' + esc(col.commesse.length ? 'è il cliente della commessa ' + (col.commesse[0].numero_commessa || col.commesse[0].nome) + '.' : 'è la ditta di un Esterno.') + ' Vuoi archiviarlo?' +
-        '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-kt-azione="archivia">Sì, archivia</button><button type="button" class="btn btn-secondario" data-kt-azione="annulla-fine">Annulla</button></div>')
-      APP.livello(function () { disegnaScheda(id) })
-      return
-    }
-    box.innerHTML = AC.avviso('warn', 'Eliminare <strong>' + esc(nome(k)) + '</strong> per sempre? Di solito basta <strong>Archivia</strong>.' +
-      '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-kt-azione="elimina-si">' + ico('togli') + '<span>Sì, elimina</span></button>' +
-      '<button type="button" class="btn btn-secondario" data-kt-azione="archivia">Archivia invece</button><button type="button" class="btn btn-secondario" data-kt-azione="annulla-fine">Annulla</button></div>')
-    APP.livello(function () { disegnaScheda(id) })
-  }
-  async function elimina(id) {
-    try {
-      await AD.cancella('tm_contatti', id)
-      AD.togliCartella(BUCKET_FOTO, id)   // le sue foto (best-effort)
-      ST.contatti = ST.contatti.filter(function (x) { return x.id !== id })
-      if (window.CM) CM.ricarica(); if (window.PS) PS.ricarica()
-      APP.libera()
-      location.hash = '#contatti'
-    } catch (e) {
-      if (e.sessioneAssente) return APP.sessioneScaduta()
-      el('kt-fine').innerHTML = AC.avviso('err', '<strong>Non eliminato:</strong> ' + esc(spiega(e)) + ' Vuoi archiviarlo?' +
-        '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-kt-azione="archivia">Sì, archivia</button><button type="button" class="btn btn-secondario" data-kt-azione="annulla-fine">Annulla</button></div>')
-    }
+  function apriCancella(id) {
+    var k = perId(id); if (!k) return
+    CX.cancella({
+      tipo: 'contatto', id: id, nome: nome(k), elenco: '#contatti', utente: ST.utente,
+      archivia: k.attivo !== false ? function () { return CX.chiudi().then(function () { return archivia(id, false) }) } : null,
+      cosaArchivia: 'non compare più negli elenchi, si trova cercando',
+      giaArchiviato: k.attivo === false ? 'È già archiviato: non compare negli elenchi.' : null,
+      file: { bucket: BUCKET_FOTO, cartella: id, parole: 'Le foto del contatto' }
+    })
   }
 
   var aperto = null
@@ -638,11 +706,12 @@ var KT = (function () {
     if (a === 'cat-crea') return creaCategoria()
     if (a === 'foto-togli') return fotoTogli()
     if (a === 'salva-comunque') { ST.salvaComunque = true; salva(); return }
-    if (a === 'archivia') return APP.chiudiLivello().then(function () { return archivia(aperto, false) })
+    if (a === 'archivia') return archivia(aperto, false)
     if (a === 'riattiva') return archivia(aperto, true)
-    if (a === 'elimina') return chiediElimina(aperto)
-    if (a === 'elimina-si') return APP.chiudiLivello().then(function () { return elimina(aperto) })
-    if (a === 'annulla-fine') return APP.chiudiLivello().then(function () { disegnaScheda(aperto) })
+    if (a === 'cancella') return apriCancella(aperto)
+    if (a === 'cat-rinomina') return rinominaCategoria(t.dataset.cat)
+    if (a === 'cat-disattiva') return attivaCategoria(t.dataset.cat, false)
+    if (a === 'cat-riattiva') return attivaCategoria(t.dataset.cat, true)
   }
 
   // parti: ['contatti'] | ['contatto', id] | ['contatto', id, 'modifica'|'fornitore'] | ['nuovo-contatto-rubrica', 'fornitore'?]
@@ -653,6 +722,17 @@ var KT = (function () {
     aperto = v === 'contatto' ? id : null
     document.body.classList.toggle('con-dettaglio', v !== 'contatti')
     disegnaElenco(aperto)
+    if (v === 'categorie') {
+      ST.form = null
+      // si rilegge: qualcun altro può averle cambiate nel frattempo
+      try {
+        var cr = (await AD.leggi('rubrica_categorie', 'id,nome,ordine,attiva,azienda_id')).sort(function (a, b) { return (a.ordine || 0) - (b.ordine || 0) })
+        if (!cr.length) throw new Error('Il database non mi dà nessuna categoria (0 righe): l\'elenco NON è attendibile.')
+        ST.categorie = cr; ST.catErrore = null
+      } catch (e) { if (e.sessioneAssente) throw e; ST.categorie = null; ST.catErrore = e.message }
+      disegnaElenco(aperto)
+      return disegnaCategorie()
+    }
     if (v === 'nuovo-contatto-rubrica') {
       if (!ST.form || ST.form.id) { ST.form = bozzaDa(null); if (parti[1] === 'fornitore') ST.form.fornitore = true }
       ST.salvaComunque = false
@@ -671,7 +751,7 @@ var KT = (function () {
       return disegnaScheda(id)
     }
     el('pane-dettaglio').innerHTML = '<div class="vuoto vuoto-grande">' + ico('contatti') + '<p>Scegli un contatto dall\'elenco,<br>oppure «Nuovo contatto».</p>' +
-      '<p class="nota">Foto e categorie si cambiano dentro «Modifica» di ogni contatto.</p></div>'
+      '<p class="nota">Foto e categorie del contatto si cambiano dentro «Modifica». I nomi delle categorie: «Gestisci categorie».</p></div>'
   }
   function avvia() { el('pane-elenco').addEventListener('click', clic); el('pane-dettaglio').addEventListener('click', clic) }
 

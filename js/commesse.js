@@ -13,7 +13,8 @@
      Si controlla nel database (foto, spese.foto_path); se il controllo non riesce,
      il nome resta bloccato lo stesso.
    - Il nome degli interni non si cambia mai (l'App Cantieri li riconosce ancora per nome).
-   - Nessun tasto Elimina: cancellare un cantiere cancella a cascata giornate e spese.
+   - Si ARCHIVIA con lo stato Conclusa o Persa (tasto «Archivia»). «Cancella» (v7): solo il titolare, con password,
+     avviso e registro (js/cancella.js). I due interni di sistema (codice_interno) non si cancellano mai.
    - Il cliente si sceglie dalla Rubrica (tm_contatti); «committente» resta come
      copia del nome, perché App Cantieri e Pre-contabilità leggono quella.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -188,6 +189,7 @@ var CM = (function () {
         '</div>' +
         AC.avviso('info', 'Gli interni non hanno numero, stato commessa né cliente. Il nome non si cambia da qui.' +
           (c.codice_interno === 'ditta' && c.nome !== 'Lavori per la ditta' ? ' Nel database si chiama ancora «' + esc(c.nome) + '» (cambia con l\'SQL ANAG_F2_05).' : ''))
+      h += htmlFine(c)
       pane.innerHTML = h
       return
     }
@@ -221,8 +223,64 @@ var CM = (function () {
       campoLettura('Creata il', esc(AC.data(c.created_at))) +
       '</div>'
     h += '<div id="cm-foto-info"></div>'
+    h += htmlFine(c)
     pane.innerHTML = h
     controllaFoto(c, function () { var x = el('cm-foto-info'); if (x) x.innerHTML = infoFoto(c) })
+  }
+
+  // ── Archivia / Cancella (v7) ──────────────────────────────────────────────
+  // Interni: riconosciuti da tipo e codice_interno, MAI dal nome. Senza la colonna codice_interno non si rischia.
+  function internoProtetto(c) { return eInterno(c) && (c.codice_interno || ST.colCantieri !== COL_CANTIERI) }
+  function archiviata(c) { return c.stato_commessa === 'Conclusa' || c.stato_commessa === 'Persa' }
+  function htmlFine(c) {
+    var tit = ST.utente && ST.utente.ruolo === 'titolare', az = '', h = ''
+    if (!eInterno(c)) {
+      if (archiviata(c)) h += '<p class="nota">' + ico('lucchetto') + '<span>Archiviata: stato «' + esc(c.stato_commessa) + '». Per riaprirla: «Modifica» e cambia lo stato.</span></p>'
+      else {
+        h += '<p class="nota">Lavoro finito o non preso? Archivia: i dati restano tutti.</p>'
+        az += '<button type="button" class="btn btn-primario" data-azione="archivia">' + ico('lucchetto') + '<span>Archivia</span></button>'
+      }
+    }
+    if (tit) {
+      if (internoProtetto(c)) h += '<p class="nota" id="cm-no-cancella">' + ico('lucchetto') + '<span>Interno di sistema: le app ci contano, non si cancella.</span></p>'
+      else az += '<button type="button" class="btn btn-pericolo" data-azione="cancella">' + ico('togli') + '<span>Cancella</span></button>'
+    }
+    if (!az && !h) return ''
+    return '<div class="blocco blocco-tenue" id="cm-fine"><h3 class="blocco-titolo">' + ico('lucchetto') + 'Archivia o cancella</h3>' + h +
+      (az ? '<div class="azioni-riga">' + az + '</div>' : '') + '</div>'
+  }
+  // Scrive solo stato_commessa (il suo). cantieri.stato è dell'App Cantieri: se è ancora Attivo lo si dice.
+  function apriArchivia(c) {
+    var corpo = '<p>Archiviare non perde niente: sparisce dalle commesse aperte, i dati restano e si ritrova con i filtri «Concluse» e «Perse».</p>' +
+      (c.stato === 'Attivo' ? AC.avviso('warn', 'Nell\'App Cantieri resta «Attivo» finché non la chiudi lì: lo stato dei lavori lo decide quell\'app.') : '') +
+      '<div id="cx-archivia-msg"></div><div class="vela-azioni">' +
+      CX.bottone('conclusa', 'Conclusa: lavoro finito', 'btn-primario', 'ok', 'cx-primo') +
+      CX.bottone('persa', 'Persa: non l\'abbiamo presa', 'btn-primario', 'chiudi') +
+      CX.bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
+    function salva(stato) {
+      return async function () {
+        try {
+          var s = await AD.aggiorna('cantieri', c.id, { stato_commessa: stato }, ST.colCantieri)
+          ST.cantieri = ST.cantieri.map(function (x) { return x.id === s.id ? s : x })
+          ST.messaggio = { tipo: 'ok', html: 'Archiviata: stato <strong>' + esc(stato) + '</strong>. I dati restano tutti.' }
+          await CX.chiudi()
+          disegnaElenco(aperto); disegnaScheda(c.id)
+        } catch (e) {
+          if (e.sessioneAssente) return APP.sessioneScaduta()
+          el('cx-archivia-msg').innerHTML = AC.avviso('err', '<strong>NON archiviata.</strong> ' + esc(spiega(e)))
+        }
+      }
+    }
+    CX.schermo('Archivia ' + (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c), corpo, { conclusa: salva('Conclusa'), persa: salva('Persa') })
+  }
+  function apriCancella(c) {
+    if (internoProtetto(c)) return
+    CX.cancella({
+      tipo: 'commessa', id: c.id, nome: (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c), elenco: '#commesse', utente: ST.utente,
+      archivia: eInterno(c) || archiviata(c) ? null : function () { apriArchivia(c) },
+      cosaArchivia: 'stato Conclusa o Persa, i dati restano tutti',
+      giaArchiviato: archiviata(c) ? 'È già archiviata: stato «' + c.stato_commessa + '».' : null
+    })
   }
 
   function testataDettaglio(titolo, badge, azioni) {
@@ -617,6 +675,8 @@ var CM = (function () {
     }
     var a = t.dataset.azione
     if (a === 'nuova') { location.hash = '#nuova-commessa'; return }
+    if (a === 'archivia') { var ca = perId(aperto); if (ca) apriArchivia(ca); return }
+    if (a === 'cancella') { var cc = perId(aperto); if (cc) apriCancella(cc); return }
     if (a === 'nuovo-interno') { location.hash = '#nuovo-interno'; return }
     if (a === 'modifica') { location.hash = '#commessa/' + t.dataset.id + '/modifica'; return }
     if (a === 'cliente-cambia' || a === 'cliente-togli') {
@@ -636,7 +696,8 @@ var CM = (function () {
 
   // ── Ingresso dalla navigazione (app.js) ───────────────────────────────────
   // parti: ['commesse'] | ['commessa', id] | ['commessa', id, 'modifica'] | ['nuova-commessa'] | ['nuovo-interno'] | ['nuovo-contatto']
-  async function mostra(parti) {
+  async function mostra(parti, utente) {
+    ST.utente = utente
     await carica()
     var v = parti[0], id = parti[1] || null
     aperto = v === 'commessa' ? id : null

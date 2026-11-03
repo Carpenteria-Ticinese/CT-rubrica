@@ -9,7 +9,8 @@
        a mano) → operai.ditta_id. Niente paga, niente accesso alle app (il database
        lo impedisce: un Esterno non può avere user_id).
      · «agenzia» (interinali) è un'altra cosa: resta com'è, solo per i Dipendenti.
-   - Anagrafiche NON legge e NON scrive paghe (tm_paghe_*): stanno in Paghe.
+   - Anagrafiche NON legge e NON scrive paghe (tm_paghe_*): stanno in Paghe. Unica eccezione: prima di
+     cancellare una persona il titolare vede QUANTE buste paga sparirebbero (solo il numero, js/cancella.js).
    - «attivo» non si scrive a mano: attivo = fine rapporto vuota, oggi o futura
      (come App Cantieri e Calendario).
    - Dati personali: solo qui, mai in operai. «Niente dati sanitari».
@@ -17,7 +18,10 @@
      mai il nome della persona. Toglie un documento solo il titolare.
    - Accesso: «Dai accesso» = salva l'email nella scheda → anag_collega_account →
      (solo se serve) crea-collaboratore → anag_collega_account. Mai due account.
-   - Nessun tasto «Elimina persona»: chi esce si chiude con la fine rapporto.
+   - Chi esce si ARCHIVIA: tasto «Archivia» = fine rapporto (ultimo giorno), resta tra «chi non lavora più con noi».
+     «Cancella» (v7): solo il titolare, con password, avviso e registro (js/cancella.js). La scheda di un account
+     titolare e la propria non si cancellano (si guarda user_id e ruolo, mai il nome). Chi ha un account:
+     l'accesso si blocca PRIMA di cancellare, finché c'è il legame («Blocca accesso», stessa funzione).
    - FINE RAPPORTO = ultimo giorno di lavoro (v3, decisione di Umberto 3.11.2026):
      dal giorno DOPO l'accesso si blocca DA SOLO (database, SQL ANAG_F2_07: trigger
      su operai + job ogni ora). Data già passata = blocco subito. Titolari mai da soli.
@@ -276,6 +280,7 @@ var PS = (function () {
     h += '<div id="ps-dp"><div class="blocco"><p class="nota">Carico i dati personali…</p></div></div>'
     h += '<div id="ps-ce"></div>'
     h += '<div id="ps-doc">' + htmlDocumenti(o) + '</div>'
+    h += htmlFine(o)
     pane.innerHTML = h
     await caricaDettagli(o)
   }
@@ -294,6 +299,120 @@ var PS = (function () {
       if (e.sessioneAssente) return APP.sessioneScaduta()
       var z = el('ps-dp'); if (z) z.innerHTML = AC.avviso('err', 'Dati personali e contatti d\'emergenza NON caricati: ' + esc(e.message))
     }
+  }
+
+  // ── Archivia / Cancella (v7) ──────────────────────────────────────────────
+  // Controllo da user_id e ruolo, MAI dal nome. null = si può cancellare, altrimenti il motivo.
+  function noCancella(o) {
+    if (!o.user_id) return null
+    if (ST.utente && o.user_id === ST.utente.id) return 'È la tua scheda: non puoi cancellarla.'
+    var p = profilo(o.user_id)
+    if (!p) return 'Non riesco a leggere il ruolo del suo account: finché non si legge, la scheda non si cancella.'
+    if (p.ruolo === 'titolare') return 'Scheda collegata a un account titolare: non si cancella.'
+    return null
+  }
+  function schedaMiaOTitolare(o) {
+    if (!o.user_id) return false
+    var p = profilo(o.user_id)
+    return (ST.utente && o.user_id === ST.utente.id) || (p && p.ruolo === 'titolare')
+  }
+  function htmlFine(o) {
+    var h = '<div class="blocco blocco-tenue" id="ps-fine"><h3 class="blocco-titolo">' + ico('lucchetto') + 'Archivia o cancella</h3>'
+    var az = ''
+    if (attiva(o)) {
+      if (!schedaMiaOTitolare(o)) {
+        h += '<p class="nota">Non lavora più con noi? Archivia: i dati restano tutti (ore, buste paga, documenti).</p>'
+        az += '<button type="button" class="btn btn-primario" data-ps-azione="archivia">' + ico('lucchetto') + '<span>Archivia</span></button>'
+      }
+    } else {
+      h += '<p class="nota">' + ico('lucchetto') + '<span>Archiviata: è fra «chi non lavora più con noi».' + (o.data_fine_rapporto ? ' Ultimo giorno ' + esc(AC.data(o.data_fine_rapporto)) + '.' : '') + '</span></p>'
+      if (o.attivo !== false) az += '<button type="button" class="btn btn-secondario" data-ps-azione="rimetti">' + ico('persone') + '<span>Rimetti fra gli attivi</span></button>'
+    }
+    if (ST.utente && ST.utente.ruolo === 'titolare') {
+      var no = noCancella(o)
+      if (no) h += '<p class="nota" id="ps-no-cancella">' + ico('lucchetto') + '<span>' + esc(no) + '</span></p>'
+      else az += '<button type="button" class="btn btn-pericolo" data-ps-azione="cancella">' + ico('togli') + '<span>Cancella</span></button>'
+    }
+    if (az) h += '<div class="azioni-riga">' + az + '</div>'
+    h += '<div id="ps-fine-msg"></div></div>'
+    return az || h.indexOf('ps-no-cancella') >= 0 || !attiva(o) ? h : ''
+  }
+  // Dopo Archivia / Rimetti: si rilegge tutto (la fine rapporto può aver bloccato l'accesso).
+  async function ridisegnaPersona(id) {
+    ST.caricato = false
+    try { await mostra(['persona', id], ST.utente) } catch (e) { if (e.sessioneAssente) return APP.sessioneScaduta(); el('pane-dettaglio').innerHTML = AC.avviso('err', esc(e.message)) }
+  }
+  function apriArchivia(o) {
+    var oggi = AC.oggiIso(), acc = o.user_id && !schedaMiaOTitolare(o)
+    var corpo = '<p>Resta fra «chi non lavora più con noi», con tutti i suoi dati. Niente si perde: si può rimettere fra gli attivi.</p>' +
+      campo('cx-fine', 'Ultimo giorno di lavoro', input('cx-fine', o.data_fine_rapporto || oggi, '', 'date'), 'Dal giorno dopo non compare più negli elenchi di lavoro.', true) +
+      (acc ? AC.avviso('warn', 'Ha un accesso alle app: si blocca da solo dal giorno dopo (se la data è già passata, subito).') : '') +
+      '<div id="cx-archivia-msg"></div><div class="vela-azioni">' + CX.bottone('salva', 'Archivia', 'btn-primario', 'lucchetto', 'cx-primo') + CX.bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
+    CX.schermo('Archivia ' + nome(o), corpo, {
+      salva: async function () {
+        var d = el('cx-fine').value, msg = el('cx-archivia-msg')
+        msg.innerHTML = ''
+        if (!d) { msg.innerHTML = AC.avviso('err', 'Scrivi l\'ultimo giorno di lavoro.'); return }
+        if (o.data_assunzione && d < o.data_assunzione) { msg.innerHTML = AC.avviso('err', 'L\'ultimo giorno è prima dell\'inizio (' + esc(AC.data(o.data_assunzione)) + ').'); return }
+        try {
+          await AD.aggiorna('operai', o.id, { data_fine_rapporto: d }, ST.sqlEsterni ? COL_OPERAI : COL_OPERAI_VECCHIE)
+          ST.messaggio = { tipo: 'ok', html: '<strong>' + esc(nome(o)) + '</strong> archiviato: ultimo giorno ' + esc(AC.data(d)) + '. I dati restano tutti.' }
+          await CX.chiudi()
+          await ridisegnaPersona(o.id)
+        } catch (e) {
+          if (e.sessioneAssente) return APP.sessioneScaduta()
+          msg.innerHTML = AC.avviso('err', '<strong>NON archiviato.</strong> ' + esc(spiega(e)))
+        }
+      }
+    })
+  }
+  async function rimetti(o) {
+    var box = el('ps-fine-msg')
+    try {
+      await AD.aggiorna('operai', o.id, { data_fine_rapporto: null }, ST.sqlEsterni ? COL_OPERAI : COL_OPERAI_VECCHIE)
+      ST.messaggio = { tipo: 'ok', html: 'Rimesso fra gli attivi.' }
+      await ridisegnaPersona(o.id)
+    } catch (e) {
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      if (box) box.innerHTML = AC.avviso('err', '<strong>NON salvato.</strong> ' + esc(spiega(e)))
+    }
+  }
+  function apriCancella(o) {
+    if (noCancella(o)) return                     // il tasto non c'è: seconda difesa
+    var s = statoAccesso(o), mail = o.email || ''
+    var avvisoAccesso = null
+    if (o.user_id) {
+      avvisoAccesso = '<strong>Ha un accesso alle app' + (mail ? ' (' + esc(mail) + ')' : '') + '.</strong> ' +
+        (s.tipo === 'bloccato' ? 'È già bloccato e resta bloccato.' : 'Prima di cancellare lo blocco: non potrà più entrare in nessuna app.') +
+        ' L\'account resta, bloccato, senza scheda.'
+    }
+    CX.cancella({
+      tipo: 'persona', id: o.id, nome: nome(o), elenco: '#persone', utente: ST.utente,
+      archivia: attiva(o) && !schedaMiaOTitolare(o) ? function () { apriArchivia(o) } : null,
+      cosaArchivia: 'resta fra «chi non lavora più con noi», con tutti i suoi dati',
+      giaArchiviato: attiva(o) ? null : 'È già archiviata: è fra «chi non lavora più con noi».',
+      avvisoAccesso: avvisoAccesso,
+      notaFatto: o.user_id ? 'Il suo accesso è bloccato: l\'account resta, senza scheda.' : '',
+      primaDi: o.user_id ? function () { return bloccaPrimaDiCancellare(o) } : null,
+      file: { bucket: BUCKET_DOC, cartella: o.id, parole: 'I file dei documenti' }
+    })
+  }
+  // Stesso meccanismo di «Blocca accesso», PRIMA di cancellare (la funzione trova l'account dalla scheda).
+  // Restituisce la funzione per tornare indietro se poi la cancellazione non riesce.
+  async function bloccaPrimaDiCancellare(o) {
+    var stati = await AD.rpc('anag_stato_accessi')
+    var a = (stati || []).filter(function (x) { return x.user_id === o.user_id })[0]
+    if (!a) throw new Error('non riesco a leggere il suo accesso: non blocco e non cancello.')
+    if (a.bloccato) return null
+    await AD.funzione('gestisci-accesso', { azione: 'blocca', operaio_id: o.id })
+    var sblocca = function () { return AD.funzione('gestisci-accesso', { azione: 'sblocca', operaio_id: o.id }) }
+    var dopo = await AD.rpc('anag_stato_accessi')
+    var b = (dopo || []).filter(function (x) { return x.user_id === o.user_id })[0]
+    if (!b || !b.bloccato) {
+      try { await sblocca() } catch (_) { /* si dice sotto */ }
+      throw new Error('l\'accesso non risulta bloccato: non cancello. Controlla l\'email della scheda.')
+    }
+    return sblocca
   }
 
   // ── Accesso (riquadro) ────────────────────────────────────────────────────
@@ -991,6 +1110,9 @@ var PS = (function () {
     }
     var a = t.dataset.psAzione
     if (a === 'nuova') { location.hash = '#nuova-persona'; return }
+    if (a === 'archivia') { var oa = perId(aperto); if (oa) apriArchivia(oa); return }
+    if (a === 'rimetti') { var or = perId(aperto); if (or) rimetti(or); return }
+    if (a === 'cancella') { var oc = perId(aperto); if (oc) apriCancella(oc); return }
     if (a === 'ex') { ST.mostraEx = !ST.mostraEx; disegnaElenco(aperto); return }
     if (a === 'ditta-cambia') { leggiModulo(); ST.form.ditta_id = null; el('ps-ditta').innerHTML = htmlDitta(); collegaDitta(); el('ps-ditta-cerca').focus(); return }
     if (a === 'ditta-nuova') { leggiModulo(); ST.form.nuovaDitta = true; el('ps-ditta').innerHTML = htmlDitta(); el('ps-nd-ragione').focus(); return }
