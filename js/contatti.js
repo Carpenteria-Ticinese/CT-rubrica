@@ -19,12 +19,12 @@ var KT = (function () {
   var esc = AC.esc, ico = AC.ico, el = AC.el
 
   var COL = 'id,categoria,categorie,ragione_sociale,nome,cognome,referente,indirizzo,cap,citta,paese,telefono,cellulare,email,sito_web,' +
-            'uid_partita_iva,iban,giorni_pagamento,note,attivo,e_cliente,e_fornitore,foto_url,created_at'
+            'uid_partita_iva,iban,giorni_pagamento,gruppo_default,note,attivo,e_cliente,e_fornitore,foto_url,created_at'
   var CAT_CLIENTE = ['preventivi', 'appalti_presi', 'appalti_conclusi']
   var PREFISSI = { CH: '41', IT: '39', DE: '49', FR: '33', AT: '43', LI: '423' }
 
   var ST = {
-    contatti: [], categorie: null, catErrore: null, cantieri: [], operai: [],
+    contatti: [], categorie: null, catErrore: null, gruppi: null, gruppiErrore: null, cantieri: [], operai: [],
     caricato: false, cerca: '', filtro: 'tutti', form: null, messaggio: null, utente: null, foto: {}
   }
 
@@ -41,13 +41,37 @@ var KT = (function () {
       ST.categorie = (await AD.leggi('rubrica_categorie', 'id,nome,ordine,attiva')).sort(function (a, b) { return (a.ordine || 0) - (b.ordine || 0) })
       ST.catErrore = null
     } catch (e) { if (e.sessioneAssente) throw e; ST.categorie = null; ST.catErrore = e.message }
+    // Gruppi per il «Gruppo predefinito» (Pre-contabilità): stessa fonte della Pre-contabilità, tm_conta_gruppi.
+    // Se non si leggono, il campo non si offre e il gruppo di ogni contatto resta com'è (mai un gruppo cancellato per sbaglio).
+    try {
+      var g = await AD.leggiConRiserva('tm_conta_gruppi', 'codice,nome,ordine,attivo,tipo,azienda_id', 'codice,nome,ordine,attivo')
+      ST.gruppi = g.righe.sort(function (a, b) { return (a.ordine || 0) - (b.ordine || 0) })
+      ST.gruppiErrore = ST.gruppi.length ? null : 'Il database non mi dà nessun gruppo (0 righe).'
+      if (!ST.gruppi.length) ST.gruppi = null
+    } catch (e) { if (e.sessioneAssente) throw e; ST.gruppi = null; ST.gruppiErrore = e.message }
     ST.caricato = true
   }
-  function svuota() { ST.contatti = []; ST.cantieri = []; ST.operai = []; ST.categorie = null; ST.caricato = false; ST.form = null; ST.foto = {} }
+  function svuota() { ST.contatti = []; ST.cantieri = []; ST.operai = []; ST.categorie = null; ST.gruppi = null; ST.gruppiErrore = null; ST.caricato = false; ST.form = null; ST.foto = {} }
   function perId(id) { return ST.contatti.filter(function (k) { return k.id === id })[0] || null }
   function nome(k) { return AC.nomeContatto(k) }
   function eCliente(k) { return k.e_cliente === true || k.categoria === 'cliente' || (Array.isArray(k.categorie) && k.categorie.some(function (c) { return CAT_CLIENTE.indexOf(c) >= 0 })) }
   function nomeCat(id) { var c = (ST.categorie || []).filter(function (x) { return x.id === id })[0]; return c ? c.nome : id }
+  // «MAT · Materiali»; un codice che non si legge (gruppo di un'altra azienda o elenco non leggibile) si mostra com'è.
+  function etichettaGruppo(cod) {
+    var g = (ST.gruppi || []).filter(function (x) { return x.codice === cod })[0]
+    return g ? g.codice + ' · ' + g.nome + (g.attivo === false ? ' (disattivato)' : '') : cod
+  }
+  function opzioniGruppo(scelto) {
+    var h = '<option value="">— nessun gruppo —</option>', trovato = false
+    ;(ST.gruppi || []).forEach(function (g) {
+      var gia = g.codice === scelto
+      if (gia) trovato = true
+      if (g.attivo === false && !gia) return                 // un gruppo disattivato non si sceglie più, ma quello già scritto resta
+      h += '<option value="' + esc(g.codice) + '"' + (gia ? ' selected' : '') + '>' + esc(g.codice + ' · ' + g.nome) + (g.attivo === false ? ' (disattivato)' : '') + '</option>'
+    })
+    if (scelto && !trovato) h += '<option value="' + esc(scelto) + '" selected>' + esc(scelto) + ' (gruppo non leggibile da qui)</option>'
+    return h
+  }
   function collegamenti(k) {
     return {
       commesse: ST.cantieri.filter(function (c) { return c.cliente_id === k.id }),
@@ -164,7 +188,8 @@ var KT = (function () {
       (Array.isArray(k.categorie) && k.categorie.length ? dato('Categorie', k.categorie.map(function (c) { return '<span class="badge st-dafare">' + esc(nomeCat(c)) + '</span>' }).join(' ')) : '') +
       dato('Note', k.note ? esc(k.note).replace(/\n/g, '<br>') : '') + '</div>'
     h += '<div class="blocco blocco-tenue">' + dato('UID / partita IVA', esc(k.uid_partita_iva || '')) + dato('IBAN', esc(k.iban || '')) +
-      dato('Giorni di pagamento', k.giorni_pagamento != null ? esc(k.giorni_pagamento) : '') + '</div>'
+      dato('Giorni di pagamento', k.giorni_pagamento != null ? esc(k.giorni_pagamento) : '') +
+      dato('Gruppo predefinito (Pre-contabilità)', k.gruppo_default ? esc(etichettaGruppo(k.gruppo_default)) : '') + '</div>'
     var col = collegamenti(k)
     if (col.commesse.length || col.esterni.length) {
       h += '<div class="blocco"><h3 class="blocco-titolo">' + ico('info') + 'Collegato a</h3>' +
@@ -200,7 +225,7 @@ var KT = (function () {
     return { id: k ? k.id : null, persona: k ? !k.ragione_sociale : false, ragione_sociale: k && k.ragione_sociale || '', nome: k && k.nome || '', cognome: k && k.cognome || '',
       referente: k && k.referente || '', telefono: k && k.telefono || '', cellulare: k && k.cellulare || '', email: k && k.email || '', sito_web: k && k.sito_web || '',
       indirizzo: k && k.indirizzo || '', cap: k && k.cap || '', citta: k && k.citta || '', paese: k && k.paese || 'CH', uid_partita_iva: k && k.uid_partita_iva || '',
-      iban: k && k.iban || '', giorni_pagamento: k && k.giorni_pagamento != null ? String(k.giorni_pagamento) : '', note: k && k.note || '',
+      iban: k && k.iban || '', gruppo: k && k.gruppo_default || '', giorni_pagamento: k && k.giorni_pagamento != null ? String(k.giorni_pagamento) : '', note: k && k.note || '',
       fornitore: k ? AC.eFornitore(k) : false, cliente: k ? eCliente(k) : false,
       categorie: k && Array.isArray(k.categorie) ? k.categorie.slice() : null }
   }
@@ -239,7 +264,10 @@ var KT = (function () {
     h += '<div class="blocco blocco-tenue"><h3 class="blocco-titolo">Per le fatture</h3>' +
       campo('kt-uid_partita_iva', 'UID / partita IVA', inp('kt-uid_partita_iva', f.uid_partita_iva, ' maxlength="40"')) +
       campo('kt-iban', 'IBAN', inp('kt-iban', f.iban, ' maxlength="42"')) +
-      campo('kt-giorni_pagamento', 'Giorni di pagamento', inp('kt-giorni_pagamento', f.giorni_pagamento, ' inputmode="numeric" maxlength="4"')) + '</div>'
+      campo('kt-giorni_pagamento', 'Giorni di pagamento', inp('kt-giorni_pagamento', f.giorni_pagamento, ' inputmode="numeric" maxlength="4"')) +
+      (ST.gruppi
+        ? campo('kt-gruppo', 'Gruppo predefinito (Pre-contabilità)', '<select id="kt-gruppo">' + opzioniGruppo(f.gruppo) + '</select>', 'La Pre-contabilità lo propone quando registra una fattura di questo contatto. Vuoto = nessun gruppo.')
+        : campo('kt-gruppo', 'Gruppo predefinito (Pre-contabilità)', '<div class="dato-valore">' + (f.gruppo ? esc(f.gruppo) : '<span class="vuoto-inline">—</span>') + '</div>', 'Elenco dei gruppi non leggibile: qui il gruppo non si cambia e resta com\'è. ' + esc(ST.gruppiErrore || ''))) + '</div>'
     h += '<div class="blocco">' + campo('kt-note', 'Note', '<textarea id="kt-note" rows="3" maxlength="2000">' + esc(f.note) + '</textarea>') + '</div>'
     h += '<div id="kt-avvisi"></div><div class="barra-salva"><a class="btn btn-secondario" href="' + esc(indietro) + '">' + ico('chiudi') + '<span>Annulla</span></a>' +
       '<button type="submit" class="btn btn-primario" id="kt-salva">' + ico('salva') + '<span>Salva</span></button></div></form>'
@@ -257,6 +285,7 @@ var KT = (function () {
     CAMPI.forEach(function (c) { var x = el('kt-' + c); if (x) f[c] = x.value })
     var t = document.querySelector('input[name="kt-tipo"]:checked'); if (t) f.persona = t.value === 'persona'
     var p = el('kt-paese'); if (p) f.paese = p.value
+    var gr = el('kt-gruppo'); if (gr && gr.tagName === 'SELECT') f.gruppo = gr.value
     f.fornitore = el('kt-fornitore') ? el('kt-fornitore').checked : f.fornitore
     f.cliente = el('kt-cliente') ? el('kt-cliente').checked : f.cliente
     var boxes = document.querySelectorAll('input[name="kt-cat"]')
@@ -291,6 +320,9 @@ var KT = (function () {
     if (riga.iban) riga.iban = riga.iban.replace(/\s+/g, '').toUpperCase()
     riga.giorni_pagamento = riga.giorni_pagamento ? parseInt(riga.giorni_pagamento, 10) : null
     riga.paese = f.paese || 'CH'
+    // Gruppo predefinito: si scrive SOLO se l'elenco si legge e il valore è cambiato (vuoto = nessun gruppo = NULL)
+    var orig0 = f.id ? perId(f.id) : null
+    if (ST.gruppi && (f.gruppo || '') !== ((orig0 && orig0.gruppo_default) || '')) riga.gruppo_default = vn(f.gruppo)
     // Categorie: si scrivono SOLO se cambiate (un contatto vecchio senza categorie resta com'era)
     var orig = f.id ? perId(f.id) : null
     var cambioTipo = !orig || f.fornitore !== AC.eFornitore(orig) || f.cliente !== eCliente(orig) || !!f.categorieScelte
@@ -337,6 +369,7 @@ var KT = (function () {
     if (/anag_operai_ditta_fk/.test(m)) return 'è la ditta di un Esterno (Persone).'
     if (/tm_conta_/.test(m)) return 'ha fatture o movimenti in Pre-contabilità.'
     if (/rf_/.test(m)) return 'è un fornitore nel Radar.'
+    if (/gruppo_default/.test(m) && /foreign key/i.test(m)) return 'il gruppo scelto non esiste più. Riapri il menu «Gruppo predefinito» e scegline un altro.'
     if (/foreign key/i.test(m)) return 'è collegato ad altri dati.'
     if (/row-level|permission denied|0 righe/i.test(m)) return 'il database non ti dà il permesso. Esci, rientra e riprova.'
     return m

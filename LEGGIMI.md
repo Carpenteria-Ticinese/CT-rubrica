@@ -4,7 +4,7 @@ App unica per **Commesse**, **Persone** (con gli accessi) e **Contatti** di Carp
 Prenderà il posto della Rubrica, **allo stesso indirizzo** (`carpenteria-ticinese.github.io/CT-rubrica/`):
 la card dell'Hub non si tocca. HTML/JS semplice + Supabase (stesso progetto delle altre app).
 
-**Stato (3.11.2026): versione 2 online (CT-rubrica `02e13d2`); versione 3 pronta in locale** (blocco dell'accesso a fine rapporto).
+**Stato (3.11.2026): versione 3 online (CT-rubrica `69dbfb7`); versione 4 pronta in locale** (Gruppo predefinito dei contatti).
 Disegno e regole: `..\Anagrafiche - ricognizione\FASE2_DISEGNO.md`. Dove siamo: `STATO.md`.
 
 ## È l'unica app che scrive
@@ -52,6 +52,9 @@ Contabilità: oggi solo il titolare, in nessun punto di Anagrafiche si apre ad a
   un Esterno non riesce a scrivere il profilo e annulla da sola l'account appena creato.
 
 ## Contatti (tabella `tm_contatti`)
+- **Gruppo predefinito (Pre-contabilità)** (v4): `tm_contatti.gruppo_default`, scelta da elenco `tm_conta_gruppi` (codice · nome; i
+  disattivati non si offrono, ma quello già scritto resta). Vuoto ammesso (= NULL). Si scrive solo se cambia; se l'elenco non si
+  legge (o un gruppo proprio non è visibile al responsabile) il campo non si tocca. La Pre-contabilità non lo scrive più.
 - Elenco a lettere con «Chiama», ricerca, filtri Tutti / Fornitori / Clienti / Archiviati / categorie della Rubrica.
 - **Fornitore in un solo modo**: il tasto «Fornitore» = `e_fornitore` (SQL ANAG_F2_04 allinea anche `categoria` e `categorie`).
 - Archiviati: fuori dagli elenchi, si trovano cercando, «Rimetti fra gli attivi». «Elimina» solo titolare; se collegato
