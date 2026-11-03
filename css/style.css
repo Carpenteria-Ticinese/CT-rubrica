@@ -316,3 +316,17 @@ input[type=checkbox] { width: 24px; height: 24px; }
 .vela-scatola h2 { margin: 0 0 8px; font-size: 22px; }
 .vela-scatola p { margin: 0 0 16px; }
 .vela-azioni { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── Contatti v6: foto e categorie nel modulo ─────────────────────────────── */
+.foto-riga { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 8px 0; }
+.foto-anteprima { width: 160px; height: 160px; border-radius: var(--radius); background: var(--surface2); border: 2px dashed var(--border2); display: flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
+.foto-anteprima .foto-contatto { width: 160px; height: 160px; max-width: none; max-height: none; margin: 0; }
+.foto-vuota { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; text-align: center; color: var(--text2); font-size: 16px; }
+.foto-vuota .ico { width: 36px; height: 36px; }
+.foto-comandi { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+label.btn:focus-within { outline: 3px solid var(--primary); outline-offset: 2px; }
+.riga-aggiungi { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+.riga-aggiungi input { flex: 1 1 200px; min-width: 0; }
+.cat-spenta { color: var(--text3); font-size: 16px; }
+.campo-nuova-cat { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+#kt-cat-aiuto { font-size: 16px; margin: 4px 0 6px; }

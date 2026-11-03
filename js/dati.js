@@ -181,11 +181,20 @@ var AD = (function () {
   async function togliFile(bucket, percorso) {
     try { await sb.storage.from(bucket).remove([percorso]) } catch (_) { /* resta un file senza riga: non è un danno */ }
   }
+  // Tutti i file di una cartella (per es. le foto di un contatto appena eliminato). Se non riesce,
+  // restano file senza contatto: non è un danno, e il database li lascia togliere (cartelle orfane).
+  async function togliCartella(bucket, cartella) {
+    try {
+      var r = await sb.storage.from(bucket).list(cartella)
+      var p = ((r && r.data) || []).map(function (f) { return cartella + '/' + f.name })
+      if (p.length) await sb.storage.from(bucket).remove(p)
+    } catch (_) { /* come sopra */ }
+  }
 
   return {
     sb: sb, sessione: sessione, richiediSessione: richiediSessione, entra: entra, esci: esci, ruolo: ruolo,
     leggi: leggi, conta: conta, inserisci: inserisci, aggiorna: aggiorna,
     colonnaMancante: colonnaMancante, leggiConRiserva: leggiConRiserva, aggiornaDove: aggiornaDove, upsert: upsert,
-    cancella: cancella, rpc: rpc, funzione: funzione, caricaFile: caricaFile, linkFirmato: linkFirmato, togliFile: togliFile
+    cancella: cancella, rpc: rpc, funzione: funzione, caricaFile: caricaFile, linkFirmato: linkFirmato, togliFile: togliFile, togliCartella: togliCartella
   }
 })()

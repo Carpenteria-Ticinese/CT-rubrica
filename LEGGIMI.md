@@ -4,7 +4,9 @@ App unica per **Commesse**, **Persone** (con gli accessi) e **Contatti** di Carp
 Prenderà il posto della Rubrica, **allo stesso indirizzo** (`carpenteria-ticinese.github.io/CT-rubrica/`):
 la card dell'Hub non si tocca. HTML/JS semplice + Supabase (stesso progetto delle altre app).
 
-**Stato (3.11.2026): versione 4 online (CT-rubrica `b6501e6`); versione 5 pronta in locale** (identità: nome Anagrafiche, viola `#6a3fa0`, icone, manifest; Invio = Entra; tasto Indietro).
+**Stato (3.11.2026): versione 5 online (CT-rubrica `2114c54`); versione 6 pronta in locale** (Contatti: foto e categorie anche qui, la Rubrica di riserva serve solo per rinominare/disattivare categorie).
+
+v5: identità (nome Anagrafiche, viola `#6a3fa0`, icone, manifest), Invio = Entra, tasto Indietro.
 
 **v5 — Tasto Indietro** (`js/app.js`): ogni schermata = una voce nella storia (`history.state.n`). Finestre e conferme (togli contatto d'emergenza, togli documento, elimina contatto) aprono un «livello» (`APP.livello`): Indietro le chiude senza cambiare schermata. Modulo con dati non salvati: Indietro, un clic su un altro elemento o «Esci» chiedono «Resta qui» / «Esci senza salvare»; dopo un salvataggio o col tasto Annulla (`data-libera`, `APP.libera()`) non chiedono. Prove: `prove/test_indietro.js` (TEST_INDIETRO). Nota per le prove: Chrome salta le voci di storia create senza un clic vero, quindi prima di provare Indietro serve un clic sulla pagina.
 Disegno e regole: `..\Anagrafiche - ricognizione\FASE2_DISEGNO.md`. Dove siamo: `STATO.md`.
@@ -62,7 +64,18 @@ Contabilità: oggi solo il titolare, in nessun punto di Anagrafiche si apre ad a
 - Archiviati: fuori dagli elenchi, si trovano cercando, «Rimetti fra gli attivi». «Elimina» solo titolare; se collegato
   (commessa, Esterno, Pre-contabilità, Radar) il database rifiuta e si propone «Archivia».
 - Indirizzi `#contatto/<id>/fornitore` e `#nuovo-contatto-rubrica/fornitore`: per il tasto «Diventa fornitore» del Radar.
-- Foto e categorie si cambiano ancora nella Rubrica di riserva.
+- **Foto del contatto** (v6, nessun SQL nuovo): nel modulo «Modifica»/«Nuovo contatto», blocco «Foto» con «Scegli foto» e «Togli foto».
+  Bucket privato `rubrica-foto`, percorso `<id contatto>/<ora>.<est>`, in `tm_contatti.foto_url` solo il percorso (si capiscono anche
+  i vecchi URL). La foto si riduce a 800 px (JPEG) e si carica **dopo** il salvataggio del contatto (per un contatto nuovo l'id c'è solo
+  dopo); se la foto non va, il contatto è salvato lo stesso e la scheda lo dice. Foto cambiata o tolta = il file vecchio si toglie dal
+  bucket. Contatto eliminato = anche le sue foto (best-effort). Si vede con link firmato di 1 ora (rinnovato dopo 40 minuti).
+  Scrivere nel bucket: policy `anag_rubrica_foto_carica` / `_cancella` (titolare e responsabile, contatto della propria ditta).
+- **Categorie** (v6, nessun SQL nuovo): nel modulo si spuntano/tolgono le categorie di `rubrica_categorie` (id in `tm_contatti.categorie`).
+  Le categorie già sul contatto ma disattivate o non più in elenco restano spuntate (con la scritta) così si possono togliere; mai perse
+  di nascosto. Le categorie si scrivono solo se cambiano. «Aggiungi categoria» crea una riga in `rubrica_categorie` (id dal nome,
+  azienda letta dalle categorie, mai sovrascrive un id che c'è già). Rinominare/disattivare una categoria resta nella Rubrica di riserva.
+  **«Fornitori» non si sceglie dalle categorie** (c'è la scritta nel modulo): solo il tasto «Fornitore» (`e_fornitore`); il trigger
+  `anag_contatti_fornitore_unico` allinea il resto. Nei filtri dell'elenco «Fornitori» compare una volta sola.
 
 ## CAP ↔ località
 `js/cap.js` legge `dati/cap_ch.json` (elenco ufficiale swisstopo, salvato qui, **mai** chiesto a internet).

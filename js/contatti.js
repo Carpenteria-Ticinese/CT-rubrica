@@ -10,8 +10,12 @@
      rifiuta se il contatto è collegato (commessa, Esterno, Pre-contabilità, Radar):
      allora si propone «Archivia».
    - Omonimi: avviso, mai blocco. CAP ↔ località: aiuto, mai blocco.
-   - Categorie multiple (rubrica_categorie) come nella Rubrica. Foto: si vedono qui
-     (link firmato); caricarle/cambiarle per ora nella Rubrica (riserva/).
+   - Categorie multiple (rubrica_categorie) come nella Rubrica: si assegnano e si tolgono nel modulo,
+     si crea una categoria nuova (la tabella permette leggere/aggiungere/modificare, mai cancellare).
+     «Fornitori» NON si sceglie dalle categorie: c'è solo il tasto «Fornitore» (e_fornitore, ANAG_F2_04).
+   - Foto (v6): bucket privato rubrica-foto, percorso <id contatto>/<ora>.<est>, in tm_contatti.foto_url
+     solo il percorso; si vede con link firmato (1 ora). Si carica / cambia / toglie nel modulo, al «Salva».
+     Contatto eliminato = anche le sue foto (best-effort).
    - azienda_id non si manda: la mette il database (trigger anag_contatti_azienda).
    ═══════════════════════════════════════════════════════════════════════════ */
 var KT = (function () {
@@ -19,14 +23,16 @@ var KT = (function () {
   var esc = AC.esc, ico = AC.ico, el = AC.el
 
   var COL = 'id,categoria,categorie,ragione_sociale,nome,cognome,referente,indirizzo,cap,citta,paese,telefono,cellulare,email,sito_web,' +
-            'uid_partita_iva,iban,giorni_pagamento,gruppo_default,note,attivo,e_cliente,e_fornitore,foto_url,created_at'
+            'uid_partita_iva,iban,giorni_pagamento,gruppo_default,note,attivo,e_cliente,e_fornitore,foto_url,azienda_id,created_at'
   var CAT_CLIENTE = ['preventivi', 'appalti_presi', 'appalti_conclusi']
   var PREFISSI = { CH: '41', IT: '39', DE: '49', FR: '33', AT: '43', LI: '423' }
 
   var ST = {
     contatti: [], categorie: null, catErrore: null, gruppi: null, gruppiErrore: null, cantieri: [], operai: [],
-    caricato: false, cerca: '', filtro: 'tutti', form: null, messaggio: null, utente: null, foto: {}
+    caricato: false, cerca: '', filtro: 'tutti', form: null, messaggio: null, utente: null, foto: {}, azienda: null
   }
+  var BUCKET_FOTO = 'rubrica-foto'
+  var FOTO_SECONDI = 3600, FOTO_RINNOVA_MS = 40 * 60 * 1000
 
   async function carica(forza) {
     if (ST.caricato && !forza) return
@@ -38,9 +44,13 @@ var KT = (function () {
     if (!r[0].length) throw new Error('Il database non mi dà i contatti (0 righe). L\'elenco NON è attendibile: esci, rientra e riprova.')
     ST.contatti = r[0]; ST.cantieri = r[1]; ST.operai = r[2].righe
     try {
-      ST.categorie = (await AD.leggi('rubrica_categorie', 'id,nome,ordine,attiva')).sort(function (a, b) { return (a.ordine || 0) - (b.ordine || 0) })
+      var cr = (await AD.leggi('rubrica_categorie', 'id,nome,ordine,attiva,azienda_id')).sort(function (a, b) { return (a.ordine || 0) - (b.ordine || 0) })
+      if (!cr.length) throw new Error('Il database non mi dà nessuna categoria (0 righe): l\'elenco NON è attendibile.')   // le categorie di partenza sono 9: zero = permessi, non «niente»
+      ST.categorie = cr
       ST.catErrore = null
     } catch (e) { if (e.sessioneAssente) throw e; ST.categorie = null; ST.catErrore = e.message }
+    // L'azienda serve per creare una categoria (la tabella non la mette da sola): dalle categorie lette, o da un contatto.
+    ST.azienda = ((ST.categorie || []).filter(function (c) { return c.azienda_id })[0] || ST.contatti.filter(function (k) { return k.azienda_id })[0] || {}).azienda_id || null
     // Gruppi per il «Gruppo predefinito» (Pre-contabilità): stessa fonte della Pre-contabilità, tm_conta_gruppi.
     // Se non si leggono, il campo non si offre e il gruppo di ogni contatto resta com'è (mai un gruppo cancellato per sbaglio).
     try {
@@ -52,7 +62,7 @@ var KT = (function () {
     ST.caricato = true
   }
   function scarta() { ST.form = null; ST.salvaComunque = false }
-  function svuota() { ST.contatti = []; ST.cantieri = []; ST.operai = []; ST.categorie = null; ST.gruppi = null; ST.gruppiErrore = null; ST.caricato = false; ST.form = null; ST.foto = {} }
+  function svuota() { ST.contatti = []; ST.cantieri = []; ST.operai = []; ST.categorie = null; ST.gruppi = null; ST.gruppiErrore = null; ST.caricato = false; ST.form = null; ST.foto = {}; ST.azienda = null }
   function perId(id) { return ST.contatti.filter(function (k) { return k.id === id })[0] || null }
   function nome(k) { return AC.nomeContatto(k) }
   function eCliente(k) { return k.e_cliente === true || k.categoria === 'cliente' || (Array.isArray(k.categorie) && k.categorie.some(function (c) { return CAT_CLIENTE.indexOf(c) >= 0 })) }
@@ -78,6 +88,85 @@ var KT = (function () {
       commesse: ST.cantieri.filter(function (c) { return c.cliente_id === k.id }),
       esterni: ST.operai.filter(function (o) { return o.ditta_id === k.id })
     }
+  }
+
+  // ── Foto (bucket privato rubrica-foto) ────────────────────────────────────
+  // In tm_contatti.foto_url sta il PERCORSO «<id contatto>/<ora>.<est>». Dal percorso si ricava il link firmato.
+  // Capisce anche i formati vecchi (URL pubblico/firmato dentro foto_url). Vuoto o rotto: null (niente foto).
+  function pathDaFotoUrl(url) {
+    var s = String(url == null ? '' : url).trim()
+    if (!s) return null
+    var p = null, m = s.match(/\/object\/(?:public|sign|authenticated)\/rubrica-foto\/([^?#]+)/)
+    if (m) p = m[1]
+    else if (!/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^\/\//.test(s)) p = s.replace(/^\/+/, '').replace(/^rubrica-foto\//, '')
+    if (!p) return null
+    try { p = decodeURIComponent(p) } catch (_) { return null }
+    var pezzi = p.split('/')
+    if (pezzi.length < 2 || pezzi.some(function (x) { return !x || x === '.' || x === '..' })) return null
+    if (/[?#\\]/.test(p)) return null
+    return p
+  }
+  // Link firmato valido 1 ora; dopo 40 minuti se ne chiede uno nuovo.
+  async function linkFoto(percorso) {
+    var c = ST.foto[percorso]
+    if (c && Date.now() - c.t < FOTO_RINNOVA_MS) return c.url
+    var url = await AD.linkFirmato(BUCKET_FOTO, percorso, FOTO_SECONDI)
+    ST.foto[percorso] = { url: url, t: Date.now() }
+    return url
+  }
+  // La foto da telefono pesa 3-5 MB: per questa bastano 800 px. Se la riduzione non riesce si carica il file com'è.
+  function ridimensiona(file, maxLato) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file), img = new Image()
+      function originale() {
+        var ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+        return { blob: file, ext: ext }
+      }
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth, h = img.naturalHeight, sc = Math.min(1, maxLato / Math.max(w, h))
+          var cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(w * sc)); cv.height = Math.max(1, Math.round(h * sc))
+          cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height)
+          cv.toBlob(function (blob) { URL.revokeObjectURL(url); resolve(blob ? { blob: blob, ext: 'jpg' } : originale()) }, 'image/jpeg', 0.85)
+        } catch (_) { URL.revokeObjectURL(url); resolve(originale()) }
+      }
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(originale()) }
+      img.src = url
+    })
+  }
+  // Si carica DOPO aver salvato il contatto: il percorso vuole l'id, e per un contatto nuovo c'è solo dopo.
+  async function caricaFoto(contattoId, file) {
+    var f = await ridimensiona(file, 800)
+    if (f.blob.size > 10 * 1024 * 1024) throw new Error('il file è troppo grande (oltre 10 MB)')
+    var percorso = contattoId + '/' + Date.now() + '.' + f.ext
+    await AD.caricaFile(BUCKET_FOTO, percorso, f.blob)
+    return percorso
+  }
+  function spiegaFoto(e) {
+    var m = String(e && e.message || e)
+    if (/row-level|policy|unauthorized|403|not allowed/i.test(m)) return 'il database non ti lascia caricare la foto (permessi). Esci, rientra e riprova.'
+    if (/bucket not found/i.test(m)) return 'il contenitore delle foto (rubrica-foto) non esiste.'
+    if (/too large|payload|troppo grande/i.test(m)) return 'il file è troppo grande.'
+    if (/Failed to fetch|network/i.test(m)) return 'non riesco a raggiungere il server: controlla la connessione.'
+    return m
+  }
+
+  // ── Categorie (rubrica_categorie) ──────────────────────────────────────────
+  // L'id è la chiave che finisce in tm_contatti.categorie e non cambia mai. Un id nuovo si ricava dal nome:
+  // «Appalti presi» → appalti_presi, «Caffè & Bar» → caffe_bar. Mai sovrascrivere un id che c'è già.
+  function slugCategoria(nome) {
+    return String(nome || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40).replace(/_+$/, '')
+  }
+  function stessoInsieme(a, b) {
+    return a.length === b.length && a.every(function (x) { return b.indexOf(x) >= 0 })
+  }
+  // Le categorie che il contatto ha adesso (senza «fornitori», che è il tasto Fornitore). Se la colonna è NULL
+  // (contatto creato altrove) si ricava dalla categoria vecchia: un «collaboratore» ha «collaboratori».
+  function categorieDi(k) {
+    if (!k) return []
+    var c = Array.isArray(k.categorie) ? k.categorie : (k.categoria === 'collaboratore' ? ['collaboratori'] : [])
+    return c.filter(function (x) { return x !== 'fornitori' })
   }
 
   // ── Link per le azioni rapide ─────────────────────────────────────────────
@@ -134,7 +223,7 @@ var KT = (function () {
     var h = '<div class="barra-elenco"><label class="cerca">' + ico('cerca') + '<span class="nascosto">Cerca</span>' +
       '<input id="kt-cerca" type="search" autocomplete="off" placeholder="Cerca nome, città, telefono" value="' + esc(ST.cerca) + '"></label>' +
       '<button type="button" class="btn btn-primario" data-kt-azione="nuovo">' + ico('piu') + '<span>Nuovo contatto</span></button></div>'
-    var cats = (ST.categorie || []).filter(function (c) { return c.attiva !== false })
+    var cats = (ST.categorie || []).filter(function (c) { return c.attiva !== false && c.id !== 'fornitori' })   // «Fornitori» c'è già come filtro (e_fornitore)
     h += '<div class="filtri" role="group" aria-label="Filtra">' + FILTRI.concat(cats.map(function (c) { return { k: 'cat:' + c.id, n: c.nome } })).map(function (f) {
       return '<button type="button" class="filtro' + (ST.filtro === f.k ? ' filtro-attivo' : '') + '" data-kt-filtro="' + esc(f.k) + '" aria-pressed="' + (ST.filtro === f.k) + '">' + esc(f.n) + '</button>'
     }).join('') + '</div>'
@@ -204,15 +293,11 @@ var KT = (function () {
     mostraFoto(k)
   }
   async function mostraFoto(k) {
-    if (!k.foto_url) return
-    var box = el('kt-foto'); if (!box) return
-    var url = /^https?:/.test(k.foto_url) ? null : k.foto_url
-    var p = url
-    if (!p) { var m = String(k.foto_url).match(/rubrica-foto\/(.+)$/); p = m ? decodeURIComponent(m[1]) : null }
-    if (!p) return
+    var p = pathDaFotoUrl(k.foto_url)
+    var box = el('kt-foto'); if (!p || !box) return
     try {
-      var s = ST.foto[p] || (ST.foto[p] = await AD.linkFirmato('rubrica-foto', p, 3600))
-      if (el('kt-foto') === box) box.innerHTML = '<img class="foto-contatto" src="' + esc(s) + '" alt="Foto di ' + esc(nome(k)) + '">'
+      var url = await linkFoto(p)
+      if (el('kt-foto') === box) box.innerHTML = '<img class="foto-contatto" src="' + esc(url) + '" alt="Foto di ' + esc(nome(k)) + '">'
     } catch (_) { /* senza foto si va avanti */ }
   }
 
@@ -228,11 +313,106 @@ var KT = (function () {
       indirizzo: k && k.indirizzo || '', cap: k && k.cap || '', citta: k && k.citta || '', paese: k && k.paese || 'CH', uid_partita_iva: k && k.uid_partita_iva || '',
       iban: k && k.iban || '', gruppo: k && k.gruppo_default || '', giorni_pagamento: k && k.giorni_pagamento != null ? String(k.giorni_pagamento) : '', note: k && k.note || '',
       fornitore: k ? AC.eFornitore(k) : false, cliente: k ? eCliente(k) : false,
-      categorie: k && Array.isArray(k.categorie) ? k.categorie.slice() : null }
+      catIniziali: categorieDi(k), catSel: null,
+      fotoPercorso: k ? pathDaFotoUrl(k.foto_url) : null, fotoLink: null, fotoFile: null, fotoAnteprima: null, fotoTogli: false }
+  }
+  // ── Foto nel modulo ───────────────────────────────────────────────────────
+  function statoFoto(f) { return f.fotoFile ? 'nuova:' + f.fotoFile.name + ':' + f.fotoFile.size : (f.fotoTogli ? 'togli' : '') }
+  function disegnaFotoModulo() {
+    var f = ST.form, box = el('kt-foto-anteprima'); if (!f || !box) return
+    var src = f.fotoFile ? f.fotoAnteprima : (f.fotoTogli ? null : f.fotoLink)
+    var avere = !!f.fotoFile || (!!f.fotoPercorso && !f.fotoTogli)
+    box.innerHTML = src ? '<img class="foto-contatto" src="' + esc(src) + '" alt="Foto del contatto">'
+      : '<div class="foto-vuota">' + ico('foto') + '<span>' + (avere ? 'Carico la foto…' : (f.fotoTogli ? 'Foto tolta: si toglie con «Salva»' : 'Nessuna foto')) + '</span></div>'
+    var t = el('kt-foto-togli'); if (t) t.hidden = !avere
+    var st = el('kt-foto-stato'); if (st) st.value = statoFoto(f)
+  }
+  async function caricaLinkFotoModulo() {
+    var f = ST.form; if (!f || !f.fotoPercorso || f.fotoLink) return
+    try {
+      var url = await linkFoto(f.fotoPercorso)
+      if (ST.form === f) { f.fotoLink = url; disegnaFotoModulo() }
+    } catch (e) {
+      var a = el('kt-foto-avviso'); if (a && ST.form === f) a.innerHTML = AC.avviso('warn', 'Non riesco a mostrare la foto di adesso: ' + esc(spiegaFoto(e)))
+    }
+  }
+  function fotoScelta(input) {
+    var f = ST.form, file = input.files && input.files[0]; if (!f || !file) return
+    var av = el('kt-foto-avviso'); av.innerHTML = ''
+    if (!/^image\//.test(file.type)) { av.innerHTML = AC.avviso('err', 'Il file scelto non è un\'immagine.'); input.value = ''; return }
+    f.fotoFile = file; f.fotoTogli = false; f.fotoAnteprima = null
+    disegnaFotoModulo()
+    var r = new FileReader()
+    r.onload = function (ev) { if (ST.form === f && f.fotoFile === file) { f.fotoAnteprima = ev.target.result; disegnaFotoModulo() } }
+    r.readAsDataURL(file)
+  }
+  function fotoTogli() {
+    var f = ST.form; if (!f) return
+    f.fotoFile = null; f.fotoAnteprima = null; f.fotoTogli = !!f.fotoPercorso
+    var i = el('kt-foto-file'); if (i) i.value = ''
+    disegnaFotoModulo()
+  }
+
+  // ── Categorie nel modulo ──────────────────────────────────────────────────
+  // Spunte: le categorie attive (senza «fornitori») + quelle che il contatto ha già ma non sono più attive o in elenco
+  // (restano spuntate, così si possono togliere; mai tolte di nascosto).
+  function disegnaChipCategorie(sel) {
+    var cats = ST.categorie || []
+    var voci = cats.filter(function (c) { return c.attiva !== false && c.id !== 'fornitori' })
+    sel.forEach(function (id) {
+      if (id === 'fornitori' || voci.some(function (v) { return v.id === id })) return
+      voci.push(cats.filter(function (c) { return c.id === id })[0] || { id: id, nome: id, attiva: false, fuori: true })
+    })
+    var box = el('kt-cat-chip'); if (!box) return
+    box.innerHTML = voci.length ? voci.map(function (c) {
+      return '<label class="scelta-voce"><input type="checkbox" name="kt-cat" value="' + esc(c.id) + '"' + (sel.indexOf(c.id) >= 0 ? ' checked' : '') + '> <span>' + esc(c.nome) +
+        (c.attiva === false ? ' <span class="cat-spenta">(' + (c.fuori ? 'non più in elenco' : 'disattivata') + ')</span>' : '') + '</span></label>'
+    }).join('') : '<div class="campo-aiuto">Nessuna categoria da scegliere.</div>'
+  }
+  function categorieSpuntate() {
+    return [].filter.call(document.querySelectorAll('input[name="kt-cat"]'), function (b) { return b.checked }).map(function (b) { return b.value })
+  }
+  function msgCat(tipo, testo) { var m = el('kt-cat-msg'); if (m) m.innerHTML = testo ? AC.avviso(tipo, testo) : '' }
+  var creandoCategoria = false
+  async function creaCategoria() {
+    if (creandoCategoria) return
+    var inp = el('kt-cat-nuova'); if (!inp) return
+    var nomeNuovo = inp.value.trim().replace(/\s+/g, ' ')
+    var id = slugCategoria(nomeNuovo), cats = ST.categorie || []
+    if (!nomeNuovo) return msgCat('err', 'Scrivi il nome della categoria nuova.')
+    if (!id) return msgCat('err', 'Il nome deve avere almeno una lettera o una cifra.')
+    var stessoId = cats.filter(function (c) { return c.id === id })[0]
+    if (stessoId) {
+      return msgCat('warn', 'C\'è già «' + esc(stessoId.nome) + '»' + (stessoId.attiva === false ? ', ma è disattivata (si riattiva dalla Rubrica di riserva)' : ': la trovi nell\'elenco qui sopra') + '. Non la creo due volte.')
+    }
+    var stessoNome = cats.filter(function (c) { return AC.normale(c.nome) === AC.normale(nomeNuovo) })[0]
+    if (stessoNome) return msgCat('warn', 'C\'è già una categoria che si chiama «' + esc(stessoNome.nome) + '». Scegli un nome diverso.')
+    if (!ST.azienda) return msgCat('err', 'Non so a quale ditta appartiene la categoria: ricarica la pagina.')
+    var ordine = cats.reduce(function (m, c) { return c.ordine != null && c.ordine > m ? c.ordine : m }, 0) + 1
+    creandoCategoria = true
+    var b = document.querySelector('[data-kt-azione="cat-crea"]'); if (b) b.disabled = true
+    try {
+      var riga = await AD.inserisci('rubrica_categorie', { id: id, azienda_id: ST.azienda, nome: nomeNuovo, ordine: ordine, attiva: true }, 'id,nome,ordine,attiva,azienda_id')
+      leggiModulo()
+      ST.categorie = cats.concat([riga]).sort(function (a, c2) { return (a.ordine || 0) - (c2.ordine || 0) })
+      var sel = (ST.form && ST.form.catSel ? ST.form.catSel : categorieSpuntate()).concat([id])
+      if (ST.form) ST.form.catSel = sel
+      disegnaChipCategorie(sel)
+      inp.value = ''
+      disegnaElenco(aperto)
+      msgCat('ok', 'Categoria <strong>' + esc(nomeNuovo) + '</strong> creata e spuntata. Va sul contatto quando premi «Salva».')
+    } catch (e) {
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      var m = String(e.message || e)
+      msgCat('err', /duplicate key|unique|23505/i.test(m + (e.codice || '')) ? 'Esiste già una categoria con questo codice («' + esc(id) + '»). Scegli un nome diverso.'
+        : /row-level|permission denied|0 righe|NON riuscito/i.test(m) ? '<strong>NON creata:</strong> il database non ti dà il permesso.' : '<strong>NON creata:</strong> ' + esc(m))
+    } finally {
+      creandoCategoria = false
+      var b2 = document.querySelector('[data-kt-azione="cat-crea"]'); if (b2) b2.disabled = false
+    }
   }
   function disegnaModulo() {
     var f = ST.form, indietro = f.id ? '#contatto/' + f.id : '#contatti'
-    var cats = (ST.categorie || []).filter(function (c) { return c.attiva !== false && c.id !== 'fornitori' })
     var h = '<form id="kt-modulo" novalidate>' + testata(f.id ? 'Modifica ' + (f.ragione_sociale || (f.nome + ' ' + f.cognome)) : 'Nuovo contatto', '', '', indietro)
     h += '<div class="blocco"><fieldset class="scelta"><legend>È una ditta o una persona?</legend>' +
       '<label class="scelta-voce"><input type="radio" name="kt-tipo" value="ditta"' + (!f.persona ? ' checked' : '') + '> <span>Ditta</span></label>' +
@@ -241,17 +421,25 @@ var KT = (function () {
         campo('kt-referente', 'Referente (persona da cercare in ditta)', inp('kt-referente', f.referente, ' maxlength="120"')) + '</div>' +
       '<div class="campi-due campi-pari">' + campo('kt-nome', f.persona ? 'Nome' : 'Nome (facoltativo)', inp('kt-nome', f.nome, ' maxlength="80"'), '', f.persona) +
         campo('kt-cognome', 'Cognome', inp('kt-cognome', f.cognome, ' maxlength="80"')) + '</div></div>'
+    h += '<div class="blocco" id="kt-blocco-foto"><h3 class="blocco-titolo">' + ico('foto') + 'Foto</h3>' +
+      '<div class="foto-riga"><div id="kt-foto-anteprima" class="foto-anteprima"></div><div class="foto-comandi">' +
+        '<label class="btn btn-secondario">' + ico('foto') + '<span>Scegli foto</span><input type="file" id="kt-foto-file" class="nascosto" accept="image/*"></label>' +
+        '<button type="button" class="btn btn-secondario" id="kt-foto-togli" data-kt-azione="foto-togli" hidden>' + ico('togli') + '<span>Togli foto</span></button></div></div>' +
+      '<input type="hidden" id="kt-foto-stato" value="">' +
+      '<div class="campo-aiuto">La foto si salva quando premi «Salva». La vedono solo titolare e responsabile.</div><div id="kt-foto-avviso"></div></div>'
     h += '<div class="blocco"><h3 class="blocco-titolo">Che cos\'è per noi</h3>' +
       '<label class="scelta-carta' + (f.fornitore ? ' scelta-carta-attiva' : '') + '"><input type="checkbox" id="kt-fornitore"' + (f.fornitore ? ' checked' : '') + '>' +
         '<span><strong>' + ico('ditta') + ' Fornitore</strong><span class="dato-sotto">ci vende materiale o lavori (anche la ditta di un Esterno)</span></span></label>' +
       '<label class="scelta-carta' + (f.cliente ? ' scelta-carta-attiva' : '') + '"><input type="checkbox" id="kt-cliente"' + (f.cliente ? ' checked' : '') + '>' +
         '<span><strong>' + ico('cliente') + ' Cliente</strong><span class="dato-sotto">gli facciamo lavori</span></span></label>'
-    if (cats.length) {
-      h += '<fieldset class="scelta"><legend>Altre categorie</legend>' + cats.map(function (c) {
-        return '<label class="scelta-voce"><input type="checkbox" name="kt-cat" value="' + esc(c.id) + '"' + (f.categorie && f.categorie.indexOf(c.id) >= 0 ? ' checked' : '') + '> <span>' + esc(c.nome) + '</span></label>'
-      }).join('') + '</fieldset>'
-    }
-    h += '</div>'
+    h += '<fieldset class="scelta" id="kt-cat-box"><legend>Altre categorie</legend><div id="kt-cat-chip"></div>' +
+      (ST.categorie ? '' : AC.avviso('warn', 'Non riesco a leggere l\'elenco delle categorie' + (ST.catErrore ? ' (' + esc(ST.catErrore) + ')' : '') + ': qui si vedono solo quelle che il contatto ha già, e non se ne creano di nuove.')) +
+      '<div class="campo-aiuto" id="kt-cat-aiuto"><strong>«Fornitori» non si sceglie da qui:</strong> si usa il tasto grande «Fornitore» qui sopra. Così un contatto è fornitore in un solo modo, uguale in tutte le app.</div>' +
+      (ST.categorie ? '<div class="campo campo-nuova-cat" id="campo-kt-cat-nuova"><label for="kt-cat-nuova">Una categoria che non c\'è? Creala</label>' +
+        '<div class="riga-aggiungi"><input id="kt-cat-nuova" type="text" maxlength="60" autocomplete="off" placeholder="Es. Geometri">' +
+        '<button type="button" class="btn btn-secondario" data-kt-azione="cat-crea">' + ico('piu') + '<span>Aggiungi categoria</span></button></div>' +
+        '<div class="campo-aiuto">La vedono tutti i contatti. Per rinominarla o disattivarla c\'è ancora la <a href="riserva/">Rubrica di riserva</a>.</div></div>' : '') +
+      '<div id="kt-cat-msg"></div></fieldset></div>'
     h += '<div class="blocco"><h3 class="blocco-titolo">Recapiti</h3>' +
       campo('kt-cellulare', 'Cellulare', inp('kt-cellulare', f.cellulare, ' inputmode="tel" maxlength="40"')) +
       campo('kt-telefono', 'Telefono fisso', inp('kt-telefono', f.telefono, ' inputmode="tel" maxlength="40"')) +
@@ -277,6 +465,10 @@ var KT = (function () {
     pane.querySelectorAll('input[name="kt-tipo"]').forEach(function (r) { r.addEventListener('change', function () { leggiModulo(); disegnaModulo() }) })
     ;['kt-fornitore', 'kt-cliente'].forEach(function (id) { el(id).addEventListener('change', function () { el(id).closest('.scelta-carta').classList.toggle('scelta-carta-attiva', el(id).checked) }) })
     el('kt-modulo').addEventListener('submit', function (ev) { ev.preventDefault(); salva() })
+    disegnaChipCategorie(f.catSel || f.catIniziali)
+    disegnaFotoModulo(); caricaLinkFotoModulo()
+    el('kt-foto-file').addEventListener('change', function () { fotoScelta(this) })
+    var cn = el('kt-cat-nuova'); if (cn) cn.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); creaCategoria() } })
     if (window.CAP) CAP.collega('kt-cap', 'kt-citta', 'kt-cap-aiuto', 'kt-paese')
     var p = el(f.persona ? 'kt-nome' : 'kt-ragione_sociale'); if (p && !f.id) p.focus()
   }
@@ -289,12 +481,7 @@ var KT = (function () {
     var gr = el('kt-gruppo'); if (gr && gr.tagName === 'SELECT') f.gruppo = gr.value
     f.fornitore = el('kt-fornitore') ? el('kt-fornitore').checked : f.fornitore
     f.cliente = el('kt-cliente') ? el('kt-cliente').checked : f.cliente
-    var boxes = document.querySelectorAll('input[name="kt-cat"]')
-    if (boxes.length) {
-      var scelte = [].filter.call(boxes, function (b) { return b.checked }).map(function (b) { return b.value })
-      var altre = (f.categorie || []).filter(function (c) { return c === 'fornitori' || ![].some.call(boxes, function (b) { return b.value === c }) })
-      f.categorieScelte = altre.filter(function (c) { return c !== 'fornitori' }).concat(scelte)
-    }
+    if (el('kt-cat-chip')) f.catSel = categorieSpuntate()
   }
   function errore(id, testo) {
     var c = el(id), e = el('err-' + id), b = el('campo-' + id)
@@ -326,9 +513,10 @@ var KT = (function () {
     if (ST.gruppi && (f.gruppo || '') !== ((orig0 && orig0.gruppo_default) || '')) riga.gruppo_default = vn(f.gruppo)
     // Categorie: si scrivono SOLO se cambiate (un contatto vecchio senza categorie resta com'era)
     var orig = f.id ? perId(f.id) : null
-    var cambioTipo = !orig || f.fornitore !== AC.eFornitore(orig) || f.cliente !== eCliente(orig) || !!f.categorieScelte
+    var catOra = f.catSel || f.catIniziali, catCambiate = !stessoInsieme(catOra, f.catIniziali)
+    var cambioTipo = !orig || f.fornitore !== AC.eFornitore(orig) || f.cliente !== eCliente(orig) || catCambiate
     if (cambioTipo) {
-      var cats = (f.categorieScelte || (orig && Array.isArray(orig.categorie) ? orig.categorie : [])).filter(function (c) { return c !== 'fornitori' })
+      var cats = catOra.filter(function (c) { return c !== 'fornitori' })
       if (f.fornitore) cats.push('fornitori')
       var clienteCat = cats.some(function (c) { return CAT_CLIENTE.indexOf(c) >= 0 })
       var categoria = (f.cliente || clienteCat) ? 'cliente' : f.fornitore ? 'fornitore' : cats.indexOf('collaboratori') >= 0 ? 'collaboratore' : 'generico'
@@ -349,14 +537,34 @@ var KT = (function () {
         return
       }
     }
+    // Foto tolta (senza una nuova): il percorso si svuota nella stessa scrittura; il file si toglie dopo.
+    if (orig && f.fotoTogli && !f.fotoFile && orig.foto_url) riga.foto_url = null
     var b = el('kt-salva'); b.disabled = true
     try {
       var k
       if (orig) { k = await AD.aggiorna('tm_contatti', orig.id, riga, COL); ST.contatti = ST.contatti.map(function (x) { return x.id === k.id ? k : x }) }
       else { riga.attivo = true; k = await AD.inserisci('tm_contatti', riga, COL); ST.contatti.push(k) }
+      // La foto dopo il contatto (il percorso vuole l'id). Se la foto non va, il contatto è salvato lo stesso e lo si dice.
+      var avvisoFoto = ''
+      var vecchiaFoto = orig ? pathDaFotoUrl(orig.foto_url) : null
+      if (f.fotoFile) {
+        var nuovoPercorso = null
+        try {
+          nuovoPercorso = await caricaFoto(k.id, f.fotoFile)
+          var k2 = await AD.aggiorna('tm_contatti', k.id, { foto_url: nuovoPercorso }, COL)
+          k = k2; ST.contatti = ST.contatti.map(function (x) { return x.id === k2.id ? k2 : x })
+          if (vecchiaFoto && vecchiaFoto !== nuovoPercorso) AD.togliFile(BUCKET_FOTO, vecchiaFoto)
+        } catch (ef) {
+          if (ef.sessioneAssente) return APP.sessioneScaduta()
+          if (nuovoPercorso) AD.togliFile(BUCKET_FOTO, nuovoPercorso)   // file senza riga: via
+          avvisoFoto = ' <strong>La foto però NON è stata caricata:</strong> ' + esc(spiegaFoto(ef)) + (vecchiaFoto ? ' (resta quella di prima)' : '')
+        }
+      } else if (orig && f.fotoTogli && vecchiaFoto) {
+        AD.togliFile(BUCKET_FOTO, vecchiaFoto)
+      }
       ST.salvaComunque = false; ST.form = null
       if (window.CM) CM.ricarica(); if (window.PS) PS.ricarica()
-      ST.messaggio = { tipo: 'ok', html: orig ? 'Modifiche salvate.' : 'Contatto <strong>' + esc(nome(k)) + '</strong> salvato.' }
+      ST.messaggio = { tipo: avvisoFoto ? 'warn' : 'ok', html: (orig ? 'Modifiche salvate.' : 'Contatto <strong>' + esc(nome(k)) + '</strong> salvato.') + avvisoFoto }
       APP.libera()
       location.hash = '#contatto/' + k.id
     } catch (e) {
@@ -407,6 +615,7 @@ var KT = (function () {
   async function elimina(id) {
     try {
       await AD.cancella('tm_contatti', id)
+      AD.togliCartella(BUCKET_FOTO, id)   // le sue foto (best-effort)
       ST.contatti = ST.contatti.filter(function (x) { return x.id !== id })
       if (window.CM) CM.ricarica(); if (window.PS) PS.ricarica()
       APP.libera()
@@ -426,6 +635,8 @@ var KT = (function () {
     if (t.dataset.ktFiltro) { ST.filtro = t.dataset.ktFiltro; disegnaElenco(aperto); return }
     var a = t.dataset.ktAzione
     if (a === 'nuovo') { location.hash = '#nuovo-contatto-rubrica'; return }
+    if (a === 'cat-crea') return creaCategoria()
+    if (a === 'foto-togli') return fotoTogli()
     if (a === 'salva-comunque') { ST.salvaComunque = true; salva(); return }
     if (a === 'archivia') return APP.chiudiLivello().then(function () { return archivia(aperto, false) })
     if (a === 'riattiva') return archivia(aperto, true)
@@ -460,7 +671,7 @@ var KT = (function () {
       return disegnaScheda(id)
     }
     el('pane-dettaglio').innerHTML = '<div class="vuoto vuoto-grande">' + ico('contatti') + '<p>Scegli un contatto dall\'elenco,<br>oppure «Nuovo contatto».</p>' +
-      '<p class="nota">Foto e categorie si cambiano ancora nella <a href="riserva/">Rubrica di riserva</a>.</p></div>'
+      '<p class="nota">Foto e categorie si cambiano dentro «Modifica» di ogni contatto.</p></div>'
   }
   function avvia() { el('pane-elenco').addEventListener('click', clic); el('pane-dettaglio').addEventListener('click', clic) }
 
