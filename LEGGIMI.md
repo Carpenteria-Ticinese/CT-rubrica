@@ -4,13 +4,14 @@ App unica per **Commesse**, **Persone** (con gli accessi) e **Contatti** di Carp
 Prenderà il posto della Rubrica, **allo stesso indirizzo** (`carpenteria-ticinese.github.io/CT-rubrica/`):
 la card dell'Hub non si tocca. HTML/JS semplice + Supabase (stesso progetto delle altre app).
 
-**Stato (2.11.2026): versione 2, NON online.** Commesse, Persone (con Esterni e Accessi) e Contatti pronti.
+**Stato (3.11.2026): versione 2 online (CT-rubrica `02e13d2`); versione 3 pronta in locale** (blocco dell'accesso a fine rapporto).
 Disegno e regole: `..\Anagrafiche - ricognizione\FASE2_DISEGNO.md`. Dove siamo: `STATO.md`.
 
 ## È l'unica app che scrive
 `operai`, `operai_dati_personali`, `operai_contatti_emergenza`, `documenti_operai` (con l'App Cantieri, che
 scrive documenti senza file), `cantieri` (`stato_commessa`, `numero_commessa`, `tipo`, `cliente_id`,
-`codice_interno`, nome e indirizzo), `tm_contatti`. Gli accessi (`profili`, account) passano dalle funzioni
+`codice_interno`, nome e indirizzo), `tm_contatti`. Tabella sua (v3): `anag_blocchi_fine_rapporto` (la scrive solo
+il database, l'app la legge). Gli accessi (`profili`, account) passano dalle funzioni
 lato server `crea-collaboratore`, `gestisci-accesso`, `cambia-ruolo` (dell'App Cantieri) e da `anag_collega_account`.
 **Non scrive mai** `cantieri.stato` dopo la creazione (è dell'App Cantieri) e non legge né scrive paghe (`tm_paghe_*`).
 
@@ -38,7 +39,17 @@ Contabilità: oggi solo il titolare, in nessun punto di Anagrafiche si apre ad a
   file nel bucket privato `tm-documenti`, percorso `<id persona>/<ora>-<nome>`, link firmato 5 minuti; toglie solo il titolare).
 - «Dai accesso»: salva l'email nella scheda → `anag_collega_account` → solo se serve `crea-collaboratore` → di nuovo
   `anag_collega_account`. Mai un secondo account, anche se interrotto. Password scelta da chi crea (min. 8), mostrata una volta.
-- `attivo` non si scrive a mano. Nessun tasto «Elimina persona».
+- `attivo` non si scrive a mano. Nessun tasto «Elimina persona» (dal 3.11 il database non lo permette: DIR_01).
+- **Fine rapporto = ultimo giorno di lavoro** (v3). Dal giorno dopo l'accesso si blocca **da solo** (SQL ANAG_F2_07:
+  trigger su `operai` = subito se la data è già passata; job pg_cron `anag-blocco-fine-rapporto` ogni ora al minuto 7,
+  ora svizzera). Stesso blocco di «Blocca accesso» (`auth.users.banned_until` + sessioni chiuse). **Titolari mai da soli.**
+  Ogni blocco è scritto in `anag_blocchi_fine_rapporto` (una volta per account e data): dopo «Sblocca accesso» a mano
+  il database non riblocca per la stessa data. Data tolta o spostata in avanti dopo il blocco: resta bloccato; la scheda
+  mostra «Accesso bloccato ma data spostata: sbloccare?» con il tasto «Sblocca accesso» (mai sbloccato da solo).
+  L'app avvisa e chiede conferma per la fine rapporto sulla **propria** scheda e per una data **già passata** di chi ha
+  l'accesso. Senza SQL 07 l'app lo dice e manda a «Blocca accesso».
+- Esterni senza account anche lato server: SQL ANAG_F2_08 (trigger su `profili`): `crea-collaboratore` con l'email di
+  un Esterno non riesce a scrivere il profilo e annulla da sola l'account appena creato.
 
 ## Contatti (tabella `tm_contatti`)
 - Elenco a lettere con «Chiama», ricerca, filtri Tutti / Fornitori / Clienti / Archiviati / categorie della Rubrica.
@@ -59,9 +70,11 @@ Solo aiuto, mai blocco.
 - Elenchi a zero righe dove non possono esserlo (commesse, persone, contatti) = errore a schermo.
 - Colonne nuove (SQL non ancora applicato): l'app lo dice e funziona con quelle vecchie (`AD.leggiConRiserva`).
 
-## SQL (in `..\Anagrafiche - ricognizione\SQL da eseguire\`, ognuno con `_INDIETRO` e `_VERIFICA`)
+## SQL (in `..\Anagrafiche - ricognizione\SQL eseguiti\`, ognuno con `_INDIETRO` e `_VERIFICA`)
 `ANAG_F2_01_esterni` · `02_accessi_documenti` · `03_codice_interno` · `04_fornitore_unico` · `05_lavori_per_la_ditta` ·
-`06_foto_rubrica_scrittura` (toglie 2 policy: decide il Direttore). Il vecchio `SQL_FASE2_*` è in `scartati\`.
+`06_foto_rubrica_scrittura` — applicati sul vero il 2.11.
+v3: `07_blocco_fine_rapporto` (+ `_ANTEPRIMA`) · `08_esterni_senza_account` — applicati sul vero il 3.11
+(backup `backup-2026-11-03-1139`, VERIFICA 10/10 e 6/6). Il vecchio `SQL_FASE2_*` è in `scartati\`.
 
 ## Versioni
 JS e CSS con `?v=N` in `index.html`; a ogni modifica si alza `N` e `VERSIONE` in `js/config.js`. Dopo il caricamento: **Ctrl+F5**.
@@ -76,8 +89,10 @@ Si aggiorna solo con una versione provata, controllando l'impronta dopo ogni cop
 - `node prove/prepara_prova.js` crea `prove/prova.html` da `index.html`. Server locale nella cartella `Anagrafiche`
   (es. `python -m http.server 8766`) → `http://localhost:8766/prove/prova.html`. Password di prova: `prova`.
 - Parametri: `?ruolo=operaio|responsabile`, `?sessione=no`, `?rpc=errore`, `?lettura=vuota`, `?scrittura=zero`,
-  `?foto=errore`, `?sql=vecchio` (database senza gli SQL ANAG_F2), `?funzioni=assenti`.
+  `?foto=errore`, `?sql=vecchio` (database senza gli SQL ANAG_F2), `?funzioni=assenti`, `?blocchi=assenti` (senza SQL 07).
 - Prove automatiche nel browser (console della pagina di prova appena caricata):
-  `prove/test_persone.js` → `await TEST_PERSONE()`, `prove/test_contatti.js` → `await TEST_CONTATTI()`.
+  `prove/test_persone.js` → `await TEST_PERSONE()`, `prove/test_contatti.js` → `await TEST_CONTATTI()`,
+  `prove/test_fine_rapporto.js` → `await TEST_FINE()` (+ `TEST_FINE_RESP()` con `?ruolo=responsabile`,
+  `TEST_FINE_SENZA07()` con `?blocchi=assenti`).
 - `prove/dati/cap_ch.json` = poche righe di prova per il CAP.
 - **La cartella `prove/` non va caricata su GitHub.**

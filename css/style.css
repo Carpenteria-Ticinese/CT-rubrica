@@ -209,6 +209,9 @@ body.con-dettaglio .pane-dettaglio { display: block; }
 .avviso-err  { background: var(--err-bg);  color: var(--err); }
 .avviso-info { background: var(--info-bg); color: var(--info); }
 .avviso a { color: inherit; font-weight: 700; }
+/* v3: un tasto dentro un avviso tiene i suoi colori (prima: testo color avviso su fondo blu, illeggibile) */
+.avviso a.btn-primario { color: var(--on-primary); }
+.avviso a.btn-secondario { color: var(--primary); }
 .avviso .ico svg, .avviso .ico { color: inherit; }
 
 /* ── Moduli ───────────────────────────────────────────────────────────────── */

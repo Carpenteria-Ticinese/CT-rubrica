@@ -18,6 +18,13 @@
    - Accesso: «Dai accesso» = salva l'email nella scheda → anag_collega_account →
      (solo se serve) crea-collaboratore → anag_collega_account. Mai due account.
    - Nessun tasto «Elimina persona»: chi esce si chiude con la fine rapporto.
+   - FINE RAPPORTO = ultimo giorno di lavoro (v3, decisione di Umberto 3.11.2026):
+     dal giorno DOPO l'accesso si blocca DA SOLO (database, SQL ANAG_F2_07: trigger
+     su operai + job ogni ora). Data già passata = blocco subito. Titolari mai da soli.
+     Data spostata o tolta DOPO il blocco: resta bloccato; la scheda avvisa «Accesso
+     bloccato ma data spostata: sbloccare?» con il tasto «Sblocca accesso» (mai da solo).
+     L'app avvisa e chiede conferma: fine rapporto sulla propria scheda, o data già
+     passata per chi ha l'accesso (si blocca subito).
    ═══════════════════════════════════════════════════════════════════════════ */
 var PS = (function () {
   'use strict'
@@ -40,6 +47,8 @@ var PS = (function () {
   var ST = {
     operai: [], contatti: [], documenti: [], profili: [], accessi: null, accessiErrore: null,
     caricato: false, sqlEsterni: true, sqlDocFile: true,
+    blocchi: [], sqlBlocchi: true,  // registro dei blocchi per fine rapporto (ANAG_F2_07)
+    confermaFine: false,
     cerca: '', mostraEx: false,
     dp: {}, ce: {},                 // per persona: dati personali, contatti d'emergenza (caricati quando si apre la scheda)
     form: null, messaggio: null, utente: null,
@@ -65,6 +74,15 @@ var PS = (function () {
       if (e.sessioneAssente) throw e
       ST.accessi = null; ST.accessiErrore = e.message
     }
+    try {
+      ST.blocchi = await AD.leggi('anag_blocchi_fine_rapporto', 'operaio_id,user_id,data_fine_rapporto,bloccato_il,come')
+      ST.sqlBlocchi = true
+    } catch (e) {
+      if (e.sessioneAssente) throw e
+      ST.blocchi = []
+      // tabella assente = SQL ANAG_F2_07 non applicato: il blocco automatico non c'è
+      ST.sqlBlocchi = !(/^(PGRST205|42P01)$/.test(String(e.codice || '')) || /does not exist|could not find the table/i.test(e.message))
+    }
     ST.caricato = true
   }
   function svuota() { ST.operai = []; ST.contatti = []; ST.documenti = []; ST.profili = []; ST.accessi = null; ST.caricato = false; ST.dp = {}; ST.ce = {}; ST.form = null; ST.esitoAccesso = null }
@@ -82,6 +100,51 @@ var PS = (function () {
     if (!a) return { tipo: 'illeggibile' }
     return { tipo: a.bloccato ? 'bloccato' : 'attivo', ultimo: a.ultimo_accesso }
   }
+  // Il giorno dopo una data «AAAA-MM-GG» (da quel giorno l'accesso è bloccato)
+  function giornoDopo(iso) {
+    var p = String(iso).slice(0, 10).split('-').map(Number)
+    return new Date(Date.UTC(p[0], p[1] - 1, p[2] + 1)).toISOString().slice(0, 10)
+  }
+  // Ultimo blocco fatto dal database per fine rapporto su questo account
+  function bloccoDi(o) {
+    if (!o || !o.user_id) return null
+    return ST.blocchi.filter(function (b) { return b.user_id === o.user_id })
+      .sort(function (a, b) { return String(b.bloccato_il).localeCompare(String(a.bloccato_il)) })[0] || null
+  }
+  // Riquadro Accesso: cosa succede con la fine rapporto ('' = niente da dire)
+  function notaFineRapporto(o, s, p) {
+    var oggi = AC.oggiIso(), f = o.data_fine_rapporto, b = bloccoDi(o)
+    if (p && p.ruolo === 'titolare') {
+      return f ? '<p class="nota">' + ico('info') + '<span>' + 'Titolare: l\'accesso <strong>non</strong> si blocca da solo con la fine rapporto.</span></p>' : ''
+    }
+    if (s.tipo === 'bloccato' && b) {
+      var h = '<p class="nota">' + ico('lucchetto') + '<span>' + 'Bloccato <strong>da solo per fine rapporto</strong> (' + esc(AC.data(b.data_fine_rapporto)) + ') il ' + esc(AC.data(b.bloccato_il)) + '.</span></p>'
+      // Data spostata in avanti (o tolta) dopo il blocco: avviso e tasto Sblocca lì accanto.
+      // Mai sbloccare da solo (Umberto, 3.11.2026): decide chi guarda la scheda.
+      if (!f || f >= oggi) {
+        var puo = !puoGestire(o)
+        h += '<div id="ps-sblocca-data">' + AC.avviso('warn', '<strong>Accesso bloccato ma data spostata: sbloccare?</strong><br>' +
+          'La fine rapporto ora è ' + (f ? '<strong>' + esc(AC.data(f)) + '</strong>' : '<strong>vuota</strong> (tempo indeterminato)') +
+          ', ma l\'accesso è ancora bloccato dal ' + esc(AC.data(b.bloccato_il)) + '. Non si sblocca da solo.' +
+          (puo ? '<div class="azioni-riga"><a class="btn btn-primario btn-largo" href="#persona/' + esc(o.id) + '/accesso/sblocca">' + ico('chiave') + '<span>Sblocca accesso</span></a></div>'
+               : '<br>' + esc(puoGestire(o)))) + '</div>'
+      }
+      return h
+    }
+    if (!f) return ''
+    if (f >= oggi) {
+      return ST.sqlBlocchi
+        ? '<p class="nota">' + ico('lucchetto') + '<span>' + 'Fine rapporto ' + esc(AC.data(f)) + ': l\'accesso si blocca <strong>da solo dal ' + esc(AC.data(giornoDopo(f))) + '</strong>.</span></p>'
+        : AC.avviso('warn', 'Fine rapporto ' + esc(AC.data(f)) + '. Il blocco automatico non è ancora attivo (manca l\'SQL ANAG_F2_07): dal ' + esc(AC.data(giornoDopo(f))) + ' premi «Blocca accesso».')
+    }
+    if (s.tipo === 'attivo') {
+      if (b && b.data_fine_rapporto === f) return '<p class="nota">' + ico('chiave') + '<span>' + 'Sbloccato a mano dopo la fine rapporto: il database non lo blocca di nuovo per questa data.</span></p>'
+      return AC.avviso('warn', '<strong>La fine rapporto (' + esc(AC.data(f)) + ') è passata ma l\'accesso è ancora attivo.</strong> ' +
+        (ST.sqlBlocchi ? 'Si blocca da solo entro un\'ora; per bloccarlo subito premi «Blocca accesso».' : 'Premi «Blocca accesso» (il blocco automatico non è ancora attivo: manca l\'SQL ANAG_F2_07).'))
+    }
+    return ''
+  }
+
   function docDi(id) { return ST.documenti.filter(function (d) { return d.operaio_id === id }).sort(function (a, b) { return String(a.scadenza || '9999').localeCompare(String(b.scadenza || '9999')) }) }
   function nomeDitta(o) { var k = o && o.ditta_id ? contatto(o.ditta_id) : null; return k ? AC.nomeContatto(k) : '' }
   function fornitori() {
@@ -266,6 +329,7 @@ var PS = (function () {
     h += dato('Stato', statoHtml + (s.ultimo ? '<span class="dato-sotto">ultimo accesso ' + esc(AC.data(s.ultimo)) + '</span>' : '')) +
          dato('Ruolo nell\'app', esc(nomeRuoloApp(p && p.ruolo)) + '<span class="dato-sotto">non è la mansione: decide cosa vede nelle app</span>') +
          dato('Contabilità', '<span class="vuoto-inline">solo il titolare (per ora non si apre a nessun altro)</span>')
+    h += notaFineRapporto(o, s, p)
     var no = puoGestire(o)
     if (no) return h + '<p class="nota">' + ico('lucchetto') + esc(no) + '</p></div>'
     h += '<div class="azioni-riga">' +
@@ -433,7 +497,7 @@ var PS = (function () {
     // Date
     h += '<div class="blocco"><div class="campi-due campi-pari">' +
       campo('ps-data_assunzione', esterno ? 'Lavora con noi dal' : 'Assunto il', input('ps-data_assunzione', f.data_assunzione, '', 'date')) +
-      campo('ps-data_fine_rapporto', 'Fine rapporto', input('ps-data_fine_rapporto', f.data_fine_rapporto, '', 'date'), 'Vuota = tempo indeterminato. Passata = non compare più negli elenchi di lavoro.') +
+      campo('ps-data_fine_rapporto', 'Fine rapporto', input('ps-data_fine_rapporto', f.data_fine_rapporto, '', 'date'), 'È l\'ultimo giorno di lavoro. Vuota = tempo indeterminato. Dal giorno dopo non compare più negli elenchi di lavoro e l\'accesso alle app si blocca da solo.') +
       '</div></div>'
 
     // Agenzia: solo Dipendenti (interinali). Per un Esterno non si mostra e non si scrive.
@@ -555,6 +619,32 @@ var PS = (function () {
       }
     }
 
+    // Fine rapporto che blocca l'accesso: avviso e conferma (mai un blocco per sbaglio)
+    var fineNuova = vuotoNull(f.data_fine_rapporto)
+    if (orig && orig.user_id && fineNuova && fineNuova !== (orig.data_fine_rapporto || null) && !ST.confermaFine) {
+      var pr = profilo(orig.user_id), mia = !!(ST.utente && orig.user_id === ST.utente.id), oggiS = AC.oggiIso()
+      var testoConf = null
+      if (pr && pr.ruolo === 'titolare') {
+        if (mia) testoConf = '<strong>Stai mettendo la fine rapporto alla TUA scheda.</strong> Sei titolare: il tuo accesso NON si blocca da solo, ma dal ' +
+          esc(AC.data(giornoDopo(fineNuova))) + ' risulterai «non lavora più con noi» in tutte le app. Confermi?'
+      } else if (mia) {
+        testoConf = '<strong>Stai mettendo la fine rapporto alla TUA scheda.</strong> ' + (fineNuova < oggiS
+          ? 'La data è passata: il tuo accesso si blocca SUBITO e non entri più in nessuna app, nemmeno qui.'
+          : 'Dal ' + esc(AC.data(giornoDopo(fineNuova))) + ' il tuo accesso si blocca da solo: non entri più in nessuna app, nemmeno qui.') +
+          ' Solo il titolare potrà sbloccarti. Confermi?'
+      } else if (fineNuova < oggiS && statoAccesso(orig).tipo === 'attivo') {
+        testoConf = 'La fine rapporto ' + esc(AC.data(fineNuova)) + ' è <strong>già passata</strong>: l\'accesso di <strong>' + esc(nome(orig)) +
+          '</strong> si blocca SUBITO (non entra più in nessuna app). Confermi?'
+      }
+      if (testoConf) {
+        el('ps-avvisi').innerHTML = AC.avviso('warn', testoConf +
+          '<div class="azioni-riga"><button type="button" class="btn btn-primario btn-piccolo" data-ps-azione="fine-conferma">' + ico('salva') + '<span>Sì, salva</span></button>' +
+          '<button type="button" class="btn btn-secondario btn-piccolo" data-ps-azione="fine-annulla">' + ico('chiudi') + '<span>No, correggo la data</span></button></div>')
+        el('ps-avvisi').scrollIntoView({ behavior: 'smooth', block: 'center' })
+        return
+      }
+    }
+
     var riga = {
       nome: String(f.nome).trim(), cognome: String(f.cognome).trim(), ruolo: vuotoNull(f.ruolo),
       telefono: vuotoNull(f.telefono), data_assunzione: vuotoNull(f.data_assunzione), data_fine_rapporto: vuotoNull(f.data_fine_rapporto)
@@ -574,9 +664,11 @@ var PS = (function () {
         salvata = await AD.aggiorna('operai', orig.id, riga, col)
         ST.operai = ST.operai.map(function (o) { return o.id === salvata.id ? salvata : o })
         ST.messaggio = { tipo: 'ok', html: 'Modifiche salvate.' }
+        // la fine rapporto può aver bloccato l'accesso (lo fa il database): rileggo accessi e blocchi
+        if (orig.user_id && (salvata.data_fine_rapporto || null) !== (orig.data_fine_rapporto || null)) ST.caricato = false
       }
       if (!salvata.rapporto) salvata.rapporto = 'dipendente'
-      ST.form = null; ST.salvaComunque = false
+      ST.form = null; ST.salvaComunque = false; ST.confermaFine = false
       location.hash = '#persona/' + salvata.id
     } catch (e) { erroreSalva(e) }
   }
@@ -896,6 +988,8 @@ var PS = (function () {
     if (a === 'ditta-salva') { salvaNuovaDitta(); return }
     if (a === 'ditta-comunque') { ST.form.dittaComunque = true; salvaNuovaDitta(); return }
     if (a === 'salva-comunque') { ST.salvaComunque = true; salvaPersona(); return }
+    if (a === 'fine-conferma') { ST.confermaFine = true; salvaPersona(); return }
+    if (a === 'fine-annulla') { el('ps-avvisi').innerHTML = ''; var dfr = el('ps-data_fine_rapporto'); if (dfr) dfr.focus(); return }
     if (a === 'ce-togli') { togliEmergenza(false); return }
     if (a === 'ce-togli-si') { togliEmergenza(true); return }
     if (a === 'ce-togli-no') { location.hash = '#persona/' + ST.ceAperto.o.id + '/emergenza/' + ST.ceAperto.c.id; disegnaEmergenza(ST.ceAperto.o, ST.ceAperto.c.id); return }
@@ -922,7 +1016,7 @@ var PS = (function () {
     if (vista === 'persona') {
       var o = perId(id)
       if (!o) { el('pane-dettaglio').innerHTML = AC.avviso('warn', 'Questa persona non c\'è (o non è leggibile). <a href="#persone">Torna all\'elenco</a>.'); return }
-      if (sotto === 'modifica') { if (!ST.form || ST.form.id !== id) ST.form = bozzaDa(o); ST.salvaComunque = false; return disegnaModulo() }
+      if (sotto === 'modifica') { if (!ST.form || ST.form.id !== id) ST.form = bozzaDa(o); ST.salvaComunque = false; ST.confermaFine = false; return disegnaModulo() }
       ST.form = null
       if (sotto === 'dati' || sotto === 'emergenza') {
         if (!(o.id in ST.dp) || !(o.id in ST.ce)) {
@@ -948,5 +1042,5 @@ var PS = (function () {
 
   return { mostra: mostra, avvia: avvia, svuota: svuota, ricarica: function () { ST.caricato = false },
            // per le prove
-           _st: ST, _attiva: attiva }
+           _st: ST, _attiva: attiva, _giornoDopo: giornoDopo }
 })()
