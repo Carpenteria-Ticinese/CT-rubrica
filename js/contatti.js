@@ -51,6 +51,7 @@ var KT = (function () {
     } catch (e) { if (e.sessioneAssente) throw e; ST.gruppi = null; ST.gruppiErrore = e.message }
     ST.caricato = true
   }
+  function scarta() { ST.form = null; ST.salvaComunque = false }
   function svuota() { ST.contatti = []; ST.cantieri = []; ST.operai = []; ST.categorie = null; ST.gruppi = null; ST.gruppiErrore = null; ST.caricato = false; ST.form = null; ST.foto = {} }
   function perId(id) { return ST.contatti.filter(function (k) { return k.id === id })[0] || null }
   function nome(k) { return AC.nomeContatto(k) }
@@ -269,7 +270,7 @@ var KT = (function () {
         ? campo('kt-gruppo', 'Gruppo predefinito (Pre-contabilità)', '<select id="kt-gruppo">' + opzioniGruppo(f.gruppo) + '</select>', 'La Pre-contabilità lo propone quando registra una fattura di questo contatto. Vuoto = nessun gruppo.')
         : campo('kt-gruppo', 'Gruppo predefinito (Pre-contabilità)', '<div class="dato-valore">' + (f.gruppo ? esc(f.gruppo) : '<span class="vuoto-inline">—</span>') + '</div>', 'Elenco dei gruppi non leggibile: qui il gruppo non si cambia e resta com\'è. ' + esc(ST.gruppiErrore || ''))) + '</div>'
     h += '<div class="blocco">' + campo('kt-note', 'Note', '<textarea id="kt-note" rows="3" maxlength="2000">' + esc(f.note) + '</textarea>') + '</div>'
-    h += '<div id="kt-avvisi"></div><div class="barra-salva"><a class="btn btn-secondario" href="' + esc(indietro) + '">' + ico('chiudi') + '<span>Annulla</span></a>' +
+    h += '<div id="kt-avvisi"></div><div class="barra-salva"><a class="btn btn-secondario" data-libera="1" href="' + esc(indietro) + '">' + ico('chiudi') + '<span>Annulla</span></a>' +
       '<button type="submit" class="btn btn-primario" id="kt-salva">' + ico('salva') + '<span>Salva</span></button></div></form>'
     el('pane-dettaglio').innerHTML = h
     var pane = el('pane-dettaglio')
@@ -356,6 +357,7 @@ var KT = (function () {
       ST.salvaComunque = false; ST.form = null
       if (window.CM) CM.ricarica(); if (window.PS) PS.ricarica()
       ST.messaggio = { tipo: 'ok', html: orig ? 'Modifiche salvate.' : 'Contatto <strong>' + esc(nome(k)) + '</strong> salvato.' }
+      APP.libera()
       location.hash = '#contatto/' + k.id
     } catch (e) {
       b.disabled = false
@@ -394,17 +396,20 @@ var KT = (function () {
     if (col.commesse.length || col.esterni.length) {
       box.innerHTML = AC.avviso('warn', '<strong>Non si può eliminare:</strong> ' + esc(col.commesse.length ? 'è il cliente della commessa ' + (col.commesse[0].numero_commessa || col.commesse[0].nome) + '.' : 'è la ditta di un Esterno.') + ' Vuoi archiviarlo?' +
         '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-kt-azione="archivia">Sì, archivia</button><button type="button" class="btn btn-secondario" data-kt-azione="annulla-fine">Annulla</button></div>')
+      APP.livello(function () { disegnaScheda(id) })
       return
     }
     box.innerHTML = AC.avviso('warn', 'Eliminare <strong>' + esc(nome(k)) + '</strong> per sempre? Di solito basta <strong>Archivia</strong>.' +
       '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-kt-azione="elimina-si">' + ico('togli') + '<span>Sì, elimina</span></button>' +
       '<button type="button" class="btn btn-secondario" data-kt-azione="archivia">Archivia invece</button><button type="button" class="btn btn-secondario" data-kt-azione="annulla-fine">Annulla</button></div>')
+    APP.livello(function () { disegnaScheda(id) })
   }
   async function elimina(id) {
     try {
       await AD.cancella('tm_contatti', id)
       ST.contatti = ST.contatti.filter(function (x) { return x.id !== id })
       if (window.CM) CM.ricarica(); if (window.PS) PS.ricarica()
+      APP.libera()
       location.hash = '#contatti'
     } catch (e) {
       if (e.sessioneAssente) return APP.sessioneScaduta()
@@ -422,11 +427,11 @@ var KT = (function () {
     var a = t.dataset.ktAzione
     if (a === 'nuovo') { location.hash = '#nuovo-contatto-rubrica'; return }
     if (a === 'salva-comunque') { ST.salvaComunque = true; salva(); return }
-    if (a === 'archivia') return archivia(aperto, false)
+    if (a === 'archivia') return APP.chiudiLivello().then(function () { return archivia(aperto, false) })
     if (a === 'riattiva') return archivia(aperto, true)
     if (a === 'elimina') return chiediElimina(aperto)
-    if (a === 'elimina-si') return elimina(aperto)
-    if (a === 'annulla-fine') return disegnaScheda(aperto)
+    if (a === 'elimina-si') return APP.chiudiLivello().then(function () { return elimina(aperto) })
+    if (a === 'annulla-fine') return APP.chiudiLivello().then(function () { disegnaScheda(aperto) })
   }
 
   // parti: ['contatti'] | ['contatto', id] | ['contatto', id, 'modifica'|'fornitore'] | ['nuovo-contatto-rubrica', 'fornitore'?]
@@ -459,5 +464,5 @@ var KT = (function () {
   }
   function avvia() { el('pane-elenco').addEventListener('click', clic); el('pane-dettaglio').addEventListener('click', clic) }
 
-  return { mostra: mostra, avvia: avvia, svuota: svuota, ricarica: function () { ST.caricato = false }, _st: ST, _whatsapp: whatsapp }
+  return { mostra: mostra, avvia: avvia, svuota: svuota, scarta: scarta, ricarica: function () { ST.caricato = false }, _st: ST, _whatsapp: whatsapp }
 })()

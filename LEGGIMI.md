@@ -4,7 +4,9 @@ App unica per **Commesse**, **Persone** (con gli accessi) e **Contatti** di Carp
 Prenderà il posto della Rubrica, **allo stesso indirizzo** (`carpenteria-ticinese.github.io/CT-rubrica/`):
 la card dell'Hub non si tocca. HTML/JS semplice + Supabase (stesso progetto delle altre app).
 
-**Stato (3.11.2026): versione 3 online (CT-rubrica `69dbfb7`); versione 4 pronta in locale** (Gruppo predefinito dei contatti).
+**Stato (3.11.2026): versione 4 online (CT-rubrica `b6501e6`); versione 5 pronta in locale** (identità: nome Anagrafiche, viola `#6a3fa0`, icone, manifest; Invio = Entra; tasto Indietro).
+
+**v5 — Tasto Indietro** (`js/app.js`): ogni schermata = una voce nella storia (`history.state.n`). Finestre e conferme (togli contatto d'emergenza, togli documento, elimina contatto) aprono un «livello» (`APP.livello`): Indietro le chiude senza cambiare schermata. Modulo con dati non salvati: Indietro, un clic su un altro elemento o «Esci» chiedono «Resta qui» / «Esci senza salvare»; dopo un salvataggio o col tasto Annulla (`data-libera`, `APP.libera()`) non chiedono. Prove: `prove/test_indietro.js` (TEST_INDIETRO). Nota per le prove: Chrome salta le voci di storia create senza un clic vero, quindi prima di provare Indietro serve un clic sulla pagina.
 Disegno e regole: `..\Anagrafiche - ricognizione\FASE2_DISEGNO.md`. Dove siamo: `STATO.md`.
 
 ## È l'unica app che scrive

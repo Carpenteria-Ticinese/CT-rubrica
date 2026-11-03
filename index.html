@@ -3,20 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Anagrafiche — Carpenteria Ticinese</title>
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0f1720" media="(prefers-color-scheme: dark)">
-  <link rel="icon" href="icone/icona.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icone/icona-180.png">
-  <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <title>Anagrafiche · Carpenteria Ticinese</title>
+  <meta name="theme-color" content="#6a3fa0">
+  <meta name="apple-mobile-web-app-title" content="Anagrafiche">
+  <link rel="icon" type="image/png" sizes="32x32" href="icone/icona-32.png?v=5">
+  <link rel="apple-touch-icon" href="icone/icona-180.png?v=5">
+  <link rel="manifest" href="manifest.json?v=5">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
 
 <!-- ── Login ───────────────────────────────────────────────────────────── -->
 <main id="pagina-login" class="pagina-centrata" hidden>
   <form id="login-form" class="scatola" novalidate>
-    <img src="icone/icona.svg" alt="" class="logo-login" width="72" height="72">
+    <img src="icone/icona.svg?v=5" alt="" class="logo-login" width="72" height="72">
     <div class="ditta">Carpenteria Ticinese</div>
     <h1>Anagrafiche</h1>
     <p class="nota">Entra con la stessa email e password delle altre app.</p>
@@ -43,7 +43,7 @@
 <div id="pagina-app" hidden>
   <header class="testata">
     <div class="testata-testo">
-      <div class="ditta">Carpenteria Ticinese</div>
+      <div class="ditta"><img src="icone/icona-32.png?v=5" alt="" class="logo-testata" width="24" height="24"><span>Anagrafiche</span></div>
       <h1 id="titolo-sezione">Commesse</h1>
     </div>
     <div class="testata-utente">
@@ -66,14 +66,26 @@
   <footer class="piede">Anagrafiche · versione <span id="versione"></span></footer>
 </div>
 
+<!-- ── Finestra «modifiche non salvate» (Indietro / Esci / altro elemento) ─── -->
+<div id="vela-uscita" class="vela" hidden>
+  <div class="vela-scatola" role="dialog" aria-modal="true" aria-labelledby="vela-titolo">
+    <h2 id="vela-titolo">Modifiche non salvate</h2>
+    <p>Hai scritto dei dati che non sono ancora salvati. Se esci, si perdono.</p>
+    <div class="vela-azioni">
+      <button id="vela-resta" type="button" class="btn btn-primario btn-largo">Resta qui</button>
+      <button id="vela-esci" type="button" class="btn btn-secondario btn-largo">Esci senza salvare</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="js/config.js?v=4"></script>
-<script src="js/comune.js?v=4"></script>
-<script src="js/dati.js?v=4"></script>
-<script src="js/cap.js?v=4"></script>
-<script src="js/commesse.js?v=4"></script>
-<script src="js/persone.js?v=4"></script>
-<script src="js/contatti.js?v=4"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/config.js?v=5"></script>
+<script src="js/comune.js?v=5"></script>
+<script src="js/dati.js?v=5"></script>
+<script src="js/cap.js?v=5"></script>
+<script src="js/commesse.js?v=5"></script>
+<script src="js/persone.js?v=5"></script>
+<script src="js/contatti.js?v=5"></script>
+<script src="js/app.js?v=5"></script>
 </body>
 </html>

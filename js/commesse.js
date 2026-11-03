@@ -61,6 +61,7 @@ var CM = (function () {
     ST.contatti = r[1]
     ST.caricato = true
   }
+  function scarta() { ST.form = null; ST.salvaComunque = false }
   function svuota() { ST.cantieri = []; ST.contatti = []; ST.caricato = false; ST.foto = {}; ST.form = null; ST.messaggio = null }
 
   function perId(id) { return ST.cantieri.filter(function (c) { return c.id === id })[0] || null }
@@ -354,7 +355,7 @@ var CM = (function () {
 
     h += '<div id="cm-avvisi-salva"></div>' +
       '<div class="barra-salva">' +
-        '<a class="btn btn-secondario" href="' + (f.id ? '#commessa/' + esc(f.id) : '#commesse') + '" data-azione="annulla">' + ico('chiudi') + '<span>Annulla</span></a>' +
+        '<a class="btn btn-secondario" href="' + (f.id ? '#commessa/' + esc(f.id) : '#commesse') + '" data-azione="annulla" data-libera="1">' + ico('chiudi') + '<span>Annulla</span></a>' +
         '<button type="submit" class="btn btn-primario" id="cm-salva">' + ico('salva') + '<span>Salva</span></button>' +
       '</div></form>'
     pane.innerHTML = h
@@ -493,6 +494,7 @@ var CM = (function () {
   }
   function tornaAlModulo() {
     var f = ST.form
+    APP.libera()
     location.hash = f && f.id ? '#commessa/' + f.id + '/modifica' : '#nuova-commessa'
   }
 
@@ -581,6 +583,7 @@ var CM = (function () {
       }
       ST.form = null; ST.salvaComunque = false
       togliBozzaLocale()
+      APP.libera()
       location.hash = '#commessa/' + salvata.id
     } catch (e) {
       bottone.disabled = false
@@ -622,7 +625,7 @@ var CM = (function () {
       if (a === 'cliente-cambia') el('cm-cliente-cerca').focus()
       return
     }
-    if (a === 'nuovo-contatto') { leggiModulo(); salvaBozzaLocale(); location.hash = '#nuovo-contatto'; return }
+    if (a === 'nuovo-contatto') { leggiModulo(); salvaBozzaLocale(); APP.libera(); location.hash = '#nuovo-contatto'; return }
     if (a === 'contatto-annulla') { tornaAlModulo(); return }
     if (a === 'contatto-comunque') { ctSalvaComunque = true; salvaContatto(); return }
     if (a === 'salva-comunque') { ST.salvaComunque = true; salva(); return }
@@ -679,5 +682,5 @@ var CM = (function () {
     el('pane-dettaglio').addEventListener('click', clic)
   }
 
-  return { mostra: mostra, avvia: avvia, svuota: svuota, ricarica: function () { ST.caricato = false } }
+  return { mostra: mostra, avvia: avvia, svuota: svuota, scarta: scarta, ricarica: function () { ST.caricato = false } }
 })()

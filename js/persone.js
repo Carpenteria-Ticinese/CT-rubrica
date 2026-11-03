@@ -85,6 +85,7 @@ var PS = (function () {
     }
     ST.caricato = true
   }
+  function scarta() { ST.form = null; ST.salvaComunque = false; ST.confermaFine = false }
   function svuota() { ST.operai = []; ST.contatti = []; ST.documenti = []; ST.profili = []; ST.accessi = null; ST.caricato = false; ST.dp = {}; ST.ce = {}; ST.form = null; ST.esitoAccesso = null }
 
   function perId(id) { return ST.operai.filter(function (o) { return o.id === id })[0] || null }
@@ -417,7 +418,7 @@ var PS = (function () {
   function vuotoNull(s) { s = String(s == null ? '' : s).trim(); return s || null }
   function barraSalva(indietro, testo) {
     return '<div id="ps-avvisi"></div><div class="barra-salva">' +
-      '<a class="btn btn-secondario" href="' + esc(indietro) + '">' + ico('chiudi') + '<span>Annulla</span></a>' +
+      '<a class="btn btn-secondario" data-libera="1" href="' + esc(indietro) + '">' + ico('chiudi') + '<span>Annulla</span></a>' +
       '<button type="submit" class="btn btn-primario" id="ps-salva">' + ico('salva') + '<span>' + esc(testo || 'Salva') + '</span></button></div>'
   }
   function erroreSalva(e) {
@@ -669,6 +670,7 @@ var PS = (function () {
       }
       if (!salvata.rapporto) salvata.rapporto = 'dipendente'
       ST.form = null; ST.salvaComunque = false; ST.confermaFine = false
+      APP.libera()
       location.hash = '#persona/' + salvata.id
     } catch (e) { erroreSalva(e) }
   }
@@ -707,6 +709,7 @@ var PS = (function () {
     try {
       ST.dp[o.id] = await AD.upsert('operai_dati_personali', riga, 'operaio_id', COL_DP)
       ST.messaggio = { tipo: 'ok', html: 'Dati personali salvati.' }
+      APP.libera()
       location.hash = '#persona/' + o.id
     } catch (e) { erroreSalva(e) }
   }
@@ -742,6 +745,7 @@ var PS = (function () {
       else { riga.operaio_id = o.id; await AD.inserisci('operai_contatti_emergenza', riga, COL_CE) }
       delete ST.ce[o.id]
       ST.messaggio = { tipo: 'ok', html: 'Contatto d\'emergenza salvato.' }
+      APP.libera()
       location.hash = '#persona/' + o.id
     } catch (e) { erroreSalva(e) }
   }
@@ -752,12 +756,14 @@ var PS = (function () {
       box.innerHTML = AC.avviso('warn', 'Togliere <strong>' + esc(x.c.nome) + '</strong> dai contatti d\'emergenza?') +
         '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-ps-azione="ce-togli-si">' + ico('togli') + '<span>Sì, togli</span></button>' +
         '<button type="button" class="btn btn-secondario" data-ps-azione="ce-togli-no">' + ico('chiudi') + '<span>Annulla</span></button></div>'
+      APP.livello(function () { disegnaEmergenza(x.o, x.c.id) })
       return
     }
     try {
       await AD.cancella('operai_contatti_emergenza', x.c.id)
       delete ST.ce[x.o.id]
       ST.messaggio = { tipo: 'ok', html: 'Contatto d\'emergenza tolto.' }
+      APP.libera()
       location.hash = '#persona/' + x.o.id
     } catch (e) {
       if (e.sessioneAssente) return APP.sessioneScaduta()
@@ -814,6 +820,7 @@ var PS = (function () {
       else { riga.operaio_id = o.id; salvato = await AD.inserisci('documenti_operai', riga, ST.sqlDocFile ? COL_DOC : COL_DOC_VECCHIE) }
       ST.documenti = ST.documenti.filter(function (x) { return x.id !== salvato.id }).concat([salvato])
       ST.messaggio = { tipo: 'ok', html: 'Documento salvato' + (file ? ' con il file.' : '.') }
+      APP.libera()
       location.hash = '#persona/' + o.id
     } catch (e) {
       if (caricato) AD.togliFile(BUCKET_DOC, caricato)
@@ -827,6 +834,7 @@ var PS = (function () {
       box.innerHTML = AC.avviso('warn', 'Togliere il documento <strong>' + esc(x.d.tipo) + '</strong>?' + (x.d.file_path ? ' Anche il file.' : '')) +
         '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-ps-azione="doc-togli-si">' + ico('togli') + '<span>Sì, togli</span></button>' +
         '<button type="button" class="btn btn-secondario" data-ps-azione="doc-togli-no">' + ico('chiudi') + '<span>Annulla</span></button></div>'
+      APP.livello(function () { disegnaDocumento(x.o, x.d.id) })
       return
     }
     try {
@@ -834,6 +842,7 @@ var PS = (function () {
       if (x.d.file_path) await AD.togliFile(BUCKET_DOC, x.d.file_path)
       ST.documenti = ST.documenti.filter(function (y) { return y.id !== x.d.id })
       ST.messaggio = { tipo: 'ok', html: 'Documento tolto.' }
+      APP.libera()
       location.hash = '#persona/' + x.o.id
     } catch (e) {
       if (e.sessioneAssente) return APP.sessioneScaduta()
@@ -911,6 +920,7 @@ var PS = (function () {
     var fatto = function (html) {
       ST.messaggio = { tipo: 'ok', html: html }
       ST.caricato = false   // ricarica stato accessi e profili
+      APP.libera()
       location.hash = '#persona/' + o.id
     }
     try {
@@ -991,11 +1001,11 @@ var PS = (function () {
     if (a === 'fine-conferma') { ST.confermaFine = true; salvaPersona(); return }
     if (a === 'fine-annulla') { el('ps-avvisi').innerHTML = ''; var dfr = el('ps-data_fine_rapporto'); if (dfr) dfr.focus(); return }
     if (a === 'ce-togli') { togliEmergenza(false); return }
-    if (a === 'ce-togli-si') { togliEmergenza(true); return }
-    if (a === 'ce-togli-no') { location.hash = '#persona/' + ST.ceAperto.o.id + '/emergenza/' + ST.ceAperto.c.id; disegnaEmergenza(ST.ceAperto.o, ST.ceAperto.c.id); return }
+    if (a === 'ce-togli-si') { APP.chiudiLivello().then(function () { togliEmergenza(true) }); return }
+    if (a === 'ce-togli-no') { APP.chiudiLivello().then(function () { disegnaEmergenza(ST.ceAperto.o, ST.ceAperto.c.id) }); return }
     if (a === 'doc-togli') { togliDocumento(false); return }
-    if (a === 'doc-togli-si') { togliDocumento(true); return }
-    if (a === 'doc-togli-no') { disegnaDocumento(ST.docAperto.o, ST.docAperto.d.id); return }
+    if (a === 'doc-togli-si') { APP.chiudiLivello().then(function () { togliDocumento(true) }); return }
+    if (a === 'doc-togli-no') { APP.chiudiLivello().then(function () { disegnaDocumento(ST.docAperto.o, ST.docAperto.d.id) }); return }
   }
   var aperto = null
 
@@ -1040,7 +1050,7 @@ var PS = (function () {
     el('pane-dettaglio').addEventListener('click', clic)
   }
 
-  return { mostra: mostra, avvia: avvia, svuota: svuota, ricarica: function () { ST.caricato = false },
+  return { mostra: mostra, avvia: avvia, svuota: svuota, scarta: scarta, ricarica: function () { ST.caricato = false },
            // per le prove
            _st: ST, _attiva: attiva, _giornoDopo: giornoDopo }
 })()

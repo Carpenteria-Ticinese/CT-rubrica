@@ -8,9 +8,11 @@
   --bg: #eef1f5;
   --surface: #ffffff;
   --surface2: #f6f8fb;
-  --primary: #1d4e89;
-  --primary-dk: #163c6a;
-  --primary-lt: #e3edf9;
+  --primary: #6a3fa0;          /* viola Anagrafiche (identità 3.11.2026) */
+  --primary-dk: #523080;
+  --primary-lt: #efe8f8;
+  --testata: #6a3fa0;         /* intestazione: testo bianco, contrasto 7,4:1 */
+  --on-testata: #ffffff;
   --on-primary: #ffffff;
   --text: #111827;
   --text2: #4b5563;
@@ -29,7 +31,8 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f1720; --surface: #18222e; --surface2: #1f2b39;
-    --primary: #6aa5e8; --primary-dk: #8bb9ef; --primary-lt: #1c2f47; --on-primary: #0b1420;
+    --primary: #c3a8ee; --primary-dk: #d6c3f4; --primary-lt: #2b2142; --on-primary: #1a1028;
+    --testata: #6a3fa0;
     --text: #f1f5f9; --text2: #c4cdd8; --text3: #9aa6b4;
     --border: #2c3a4a; --border2: #3b4c60;
     --ok: #6ee7b7; --ok-bg: #12352a; --warn: #fcd34d; --warn-bg: #3a2c0c;
@@ -79,10 +82,17 @@ h1, h2, h3 { line-height: 1.25; margin: 0; }
 /* ── Testata ──────────────────────────────────────────────────────────────── */
 .testata {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 12px 16px; background: var(--testata); color: var(--on-testata); border-bottom: 1px solid var(--primary-dk);
   position: sticky; top: 0; z-index: 20;
 }
-.testata h1 { font-size: 26px; }
+.testata h1 { font-size: 26px; color: var(--on-testata); }
+.testata .ditta { display: flex; align-items: center; gap: 8px; color: var(--on-testata); text-transform: none; font-size: 17px; font-weight: 700; letter-spacing: 0; }
+.logo-testata { border-radius: 6px; flex: none; }
+.testata .utente { color: var(--on-testata); }
+.testata .utente .ruolo { background: #ffffff; color: #4a2a78; }
+.testata .btn-testo { color: var(--on-testata); border: 2px solid rgba(255,255,255,.7); }
+.testata .btn-testo:hover { background: rgba(255,255,255,.18); }
+.testata .btn:focus-visible { outline-color: #ffffff; }
 .testata-utente { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .utente { font-size: 15px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34vw; }
 .utente .ruolo { display: inline-block; padding: 1px 8px; border-radius: 99px; background: var(--primary-lt); color: var(--primary); font-weight: 600; }
@@ -298,3 +308,11 @@ input[type=checkbox] { width: 24px; height: 24px; }
 }
 .barra-salva .btn { flex: 1; max-width: 260px; }
 @media (min-width: 1000px) { .barra-salva { bottom: 0; } }
+
+/* ── Finestra «modifiche non salvate» (si chiude anche con Indietro) ──────── */
+.vela { position: fixed; inset: 0; z-index: 100; background: rgba(15,23,32,.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.vela[hidden] { display: none; }
+.vela-scatola { background: var(--surface); color: var(--text); border-radius: var(--radius); box-shadow: 0 8px 30px rgba(0,0,0,.35); padding: 22px 20px; width: 100%; max-width: 440px; border: 3px solid var(--primary); }
+.vela-scatola h2 { margin: 0 0 8px; font-size: 22px; }
+.vela-scatola p { margin: 0 0 16px; }
+.vela-azioni { display: flex; flex-direction: column; gap: 10px; }
