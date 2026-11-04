@@ -338,8 +338,6 @@ label.btn:focus-within { outline: 3px solid var(--primary); outline-offset: 2px;
 .vela-lunga .vela-scatola { margin: auto 0; max-width: 520px; }
 .cx-lista { margin: 6px 0 12px; padding-left: 22px; }
 .cx-lista li { margin: 4px 0; }
-.cx-lista .dato-sotto { display: block; }
-.cx-sottotitolo { font-size: 18px; margin: 14px 0 4px; }
 .cx-campo { margin-top: 14px; }
 .cx-azioni { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 10px; }
 .cx-azioni .btn { padding-left: 8px; padding-right: 8px; }

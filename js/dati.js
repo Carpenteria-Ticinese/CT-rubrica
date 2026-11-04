@@ -25,7 +25,8 @@ var AD = (function () {
     var x = new Error(cosa + ': ' + m)
     x.originale = e
     x.codice = e && e.code
-    if (e && /JWT|token|not authenticated|401/i.test(m)) x.sessioneAssente = true
+    // 23503 = rifiuto per dati collegati: il messaggio contiene numeri («giornate (401)»), non è una sessione scaduta.
+    if (e && e.code !== '23503' && /JWT|token|not authenticated|401/i.test(m)) x.sessioneAssente = true
     return x
   }
 

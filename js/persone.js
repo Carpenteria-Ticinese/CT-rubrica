@@ -394,7 +394,7 @@ var PS = (function () {
       avvisoAccesso: avvisoAccesso,
       notaFatto: o.user_id ? 'Il suo accesso è bloccato: l\'account resta, senza scheda.' : '',
       primaDi: o.user_id ? function () { return bloccaPrimaDiCancellare(o) } : null,
-      file: { bucket: BUCKET_DOC, cartella: o.id, parole: 'I file dei documenti' }
+      idAccount: o.user_id || null
     })
   }
   // Stesso meccanismo di «Blocca accesso», PRIMA di cancellare (la funzione trova l'account dalla scheda).

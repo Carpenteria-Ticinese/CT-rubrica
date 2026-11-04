@@ -1,22 +1,25 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Anagrafiche — CANCELLARE (v7, regola di Umberto del 3.11.2026)
+   Anagrafiche — CANCELLARE (v8, regola di Umberto del 4.11.2026, sostituisce la v7)
 
-   «Cancellare si può, SOLO il titolare, dopo aver riscritto la password. Prima:
-   avviso con i dati collegati e proposta "Archivia invece". Ogni cancellazione va
-   in un registro che vedo solo io.»
+   «Una persona o una commessa con QUALUNQUE dato collegato non si cancella: si archivia.
+   Si conserva per 10 anni (CO 958f). Si cancella solo quello inserito per errore, senza
+   nessun dato. Solo il titolare, dopo aver riscritto la password, e va nel Registro.»
 
-   Il database fa la sua parte (SQL DIR_02): DELETE solo al ruolo titolare; il trigger
-   anag_registra_cancellazione scrive il registro e non si può saltare.
-   Qui c'è il resto, uguale per Persone, Contatti e Commesse:
-     1. conta dalle tabelle i dati collegati (LEGAMI: stesso elenco delle chiavi esterne);
-     2. se qualcosa BLOCCA: niente password, si spiega cosa blocca e si propone Archivia;
-     3. altrimenti avviso: cosa sparisce a cascata, cosa resta, tasto «Archivia invece»
-        accanto a «Cancella»;
-     4. riconferma: password del login in uso, signInWithPassword di verifica. La password
-        non si salva, non si scrive da nessuna parte, il campo si svuota SEMPRE;
+   Il database fa la sua parte: DIR_02 (DELETE solo al titolare, il trigger scrive il registro)
+   e DIR_03 (il trigger anag_blocca_con_dati conta tutto, anche le righe che le regole RLS
+   nascondono, e rifiuta con il codice 23503). Qui c'è il resto, uguale per Persone, Contatti e Commesse:
+     1. conta dalle tabelle i dati collegati (LEGAMI);
+     2. se c'è ANCHE UNA SOLA riga: schermo di blocco, dice cosa c'è, niente password, «Archivia invece»;
+     3. se una lettura è negata o dà errore: non si va avanti;
+     4. altrimenti avviso con «Archivia invece» accanto a «Cancella» e riconferma: password del
+        login in uso, signInWithPassword di verifica. La password non si salva, non si scrive da
+        nessuna parte, il campo si svuota SEMPRE;
      5. cancella e controlla le righe restituite (0 righe = errore a schermo).
-   Un legame nuovo non ancora in LEGAMI non fa danni: il database rifiuta (23503),
-   l'app lo dice con il nome della tabella.
+   L'app può vedere meno del database (RLS, tabella nuova non in LEGAMI): se il database rifiuta
+   (23503) si mostra lo stesso schermo di blocco, a parole, e l'accesso bloccato prima si sblocca.
+
+   Niente file da togliere per persone e commesse: senza dati collegati non ce ne sono, e i file
+   delle foto di cantiere non si toccano. Restano solo le foto dei contatti (o.file).
 
    Finestra: #vela-cancella (fuori dal modulo, così la password non entra mai nella
    «firma» dei campi di app.js) e un livello di APP: Indietro la chiude.
@@ -61,105 +64,120 @@ var CX = (function () {
     tm_conta_fatture: ['fattura di vendita', 'fatture di vendita'],
     tm_conta_fatture_acquisto: ['fattura d\'acquisto', 'fatture d\'acquisto'],
     tm_conta_movimenti_propri: ['movimento in Contabilità', 'movimenti in Contabilità'],
-    tm_conta_offerte: ['offerta in Contabilità', 'offerte in Contabilità']
+    tm_conta_offerte: ['offerta in Contabilità', 'offerte in Contabilità'],
+    tm_conta_classificazioni: ['classificazione in Contabilità', 'classificazioni in Contabilità'],
+    tm_conta_cantiere_contratto: ['contratto in Contabilità', 'contratti in Contabilità'],
+    tm_sicurezza_dpi: ['dotazione di sicurezza', 'dotazioni di sicurezza'],
+    pl_assegnazioni: ['assegnazione nel Calendario', 'assegnazioni nel Calendario'],
+    pl_assegnazioni_previste: ['assegnazione prevista nel Calendario', 'assegnazioni previste nel Calendario'],
+    pl_assenze: ['assenza nel Calendario', 'assenze nel Calendario']
   }
+  // Senza numero (n assente): solo il nome al plurale. Una tabella non in elenco si legge senza i trattini.
   function parole(tabella, n) {
-    var k = String(tabella).replace(/^public\./, ''), p = PAROLE[k]
-    return n + ' ' + (p ? (n === 1 ? p[0] : p[1]) : k)
+    var k = String(tabella).replace(/^public\./, ''), p = PAROLE[k], nome = p ? (n === 1 ? p[0] : p[1]) : k.replace(/_/g, ' ')
+    return n == null ? nome : n + ' ' + nome
   }
 
-  // Elenco controllato sulle chiavi esterne (pg_constraint, 4.11.2026):
-  // cascata = sparisce con la riga · blocca = il database rifiuta finché c'è · vuota = resta, senza legame.
-  // somma: colonna da sommare e mostrare («… ore»). col: colonna per contare (se la tabella non ha id).
+  // Ogni riga in una di queste tabelle BLOCCA la cancellazione. Elenco: le 41 chiavi esterne (pg_constraint, 4.11.2026)
+  // più le colonne senza chiave esterna che DIR_03 guarda a mano. Stesso elenco del database, che però lo legge dal catalogo.
+  // somma: colonna da sommare e mostrare («… ore»).
+  // ancheAccount: senza chiave esterna; DIR_03 confronta sia l'id della scheda sia l'id dell'account
+  // (foto.operaio_id contiene l'id dell'account).
   var LEGAMI = {
     persona: {
       tabella: 'operai', cosa: 'la scheda',
-      cascata: [
-        { t: 'giornate', c: 'operaio_id', somma: 'ore_totali', nota: 'con le loro voci di lavoro e la regia legata' },
-        { t: 'tm_paghe_periodo', c: 'operaio_id', nota: 'con le loro voci' },
-        { t: 'tm_paghe_anagrafica', c: 'operaio_id' },
-        { t: 'assenze', c: 'operaio_id' },
-        { t: 'documenti_operai', c: 'operaio_id', nota: 'anche i file' },
-        { t: 'operai_dati_personali', c: 'operaio_id', col: 'operaio_id' },
-        { t: 'operai_contatti_emergenza', c: 'operaio_id' },
-        { t: 'ore_contrattuali', c: 'operaio_id' },
-        { t: 'cantieri_visibili', c: 'operaio_id' }
-      ],
-      blocca: [
+      legami: [
+        { t: 'giornate', c: 'operaio_id', somma: 'ore_totali' },
+        { t: 'tm_paghe_periodo', c: 'operaio_id' }, { t: 'tm_paghe_anagrafica', c: 'operaio_id' },
+        { t: 'assenze', c: 'operaio_id' }, { t: 'documenti_operai', c: 'operaio_id' },
+        { t: 'operai_dati_personali', c: 'operaio_id' }, { t: 'operai_contatti_emergenza', c: 'operaio_id' },
+        { t: 'ore_contrattuali', c: 'operaio_id' }, { t: 'cantieri_visibili', c: 'operaio_id' },
         { t: 'regia', c: 'operaio_id' }, { t: 'spese', c: 'operaio_id' }, { t: 'bolle_consegna', c: 'operaio_id' },
         { t: 'piano_giorno', c: 'operaio_id' }, { t: 'mezzi', c: 'operaio_default_id' },
-        { t: 'anag_blocchi_fine_rapporto', c: 'operaio_id' }, { t: 'tm_documenti', c: 'operaio_id' }
-      ],
-      vuota: []
+        { t: 'anag_blocchi_fine_rapporto', c: 'operaio_id' }, { t: 'tm_documenti', c: 'operaio_id' },
+        { t: 'tm_sicurezza_dpi', c: 'operaio_id', ancheAccount: true },
+        { t: 'pl_assegnazioni', c: 'persona_id', ancheAccount: true },
+        { t: 'pl_assegnazioni_previste', c: 'persona_id', ancheAccount: true },
+        { t: 'pl_assenze', c: 'persona_id', ancheAccount: true },
+        { t: 'foto', c: 'operaio_id', ancheAccount: true }
+      ]
     },
     commessa: {
       tabella: 'cantieri', cosa: 'la commessa',
-      cascata: [
-        { t: 'giornate', c: 'cantiere_id', somma: 'ore_totali', nota: 'con le loro voci di lavoro' },
-        { t: 'regia', c: 'cantiere_id' }, { t: 'spese', c: 'cantiere_id' },
-        { t: 'foto', c: 'cantiere_id', nota: 'i file restano nell\'archivio di Cantieri' },
+      legami: [
+        { t: 'giornate', c: 'cantiere_id', somma: 'ore_totali' },
+        { t: 'regia', c: 'cantiere_id' }, { t: 'spese', c: 'cantiere_id' }, { t: 'foto', c: 'cantiere_id' },
         { t: 'lavorazioni', c: 'cantiere_id' }, { t: 'materiali', c: 'cantiere_id' }, { t: 'materiali_cantiere', c: 'cantiere_id' },
-        { t: 'preventivi_cantiere', c: 'cantiere_id' }, { t: 'cantiere_figure', c: 'cantiere_id' }, { t: 'cantieri_visibili', c: 'cantiere_id' }
-      ],
-      blocca: [
+        { t: 'preventivi_cantiere', c: 'cantiere_id' }, { t: 'cantiere_figure', c: 'cantiere_id' }, { t: 'cantieri_visibili', c: 'cantiere_id' },
         { t: 'pl_commesse', c: 'cantiere_id' }, { t: 'piano_giorno', c: 'cantiere_id' }, { t: 'assenze', c: 'cantiere_id' },
-        { t: 'bolle_consegna', c: 'cantiere_id' }, { t: 'pagamenti_ricevuti', c: 'cantiere_id' }, { t: 'pv_offerte', c: 'cantiere_id' }
-      ],
-      vuota: [{ t: 'tiri_gru', c: 'cantiere_id' }]
+        { t: 'bolle_consegna', c: 'cantiere_id' }, { t: 'pagamenti_ricevuti', c: 'cantiere_id' }, { t: 'pv_offerte', c: 'cantiere_id' },
+        { t: 'tiri_gru', c: 'cantiere_id' },
+        { t: 'tm_conta_classificazioni', c: 'cantiere_id' }, { t: 'tm_conta_movimenti_propri', c: 'cantiere_id' },
+        { t: 'tm_conta_fatture_acquisto', c: 'cantiere_id' }, { t: 'tm_conta_fatture', c: 'cantiere_id' },
+        { t: 'tm_conta_offerte', c: 'cantiere_id' }, { t: 'tm_conta_cantiere_contratto', c: 'cantiere_id' }
+      ]
     },
     contatto: {
       tabella: 'tm_contatti', cosa: 'il contatto',
-      cascata: [],
-      blocca: [
+      legami: [
         { t: 'cantieri', c: 'cliente_id' }, { t: 'operai', c: 'ditta_id' }, { t: 'rf_fornitori', c: 'contatto_id' },
         { t: 'tm_conta_fatture', c: 'contatto_id' }, { t: 'tm_conta_fatture_acquisto', c: 'contatto_id' },
         { t: 'tm_conta_movimenti_propri', c: 'contatto_id' }, { t: 'tm_conta_offerte', c: 'contatto_id' }, { t: 'pv_offerte', c: 'cliente_id' }
-      ],
-      vuota: []
+      ]
     }
   }
 
   // ── Conteggi ──────────────────────────────────────────────────────────────
-  function tabellaAssente(e) { return /^(PGRST205|42P01)$/.test(String(e && e.codice || '')) || /could not find the table|does not exist/i.test(String(e && e.message || '')) }
+  // Solo la TABELLA assente si salta. Una colonna assente (42703) è un errore: non si sa cosa c'è, non si va avanti.
+  function tabellaAssente(e) { return /^(PGRST205|42P01)$/.test(String(e && e.codice || '')) || /could not find the table|relation .* does not exist/i.test(String(e && e.message || '')) }
   function numeroOre(x) { return Number(x).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[’']/g, '\'').replace('.', ',') }
 
   // Una tabella che sul database non c'è (Preventivi non ancora online) non ha dati: si salta.
-  async function contaLegame(l, id) {
+  // Si conta sulla colonna del legame: non tutte le tabelle hanno una colonna «id».
+  async function contaLegame(l, id, idAccount) {
+    var filtro = function (q) { return l.ancheAccount && idAccount ? q.in(l.c, [id, idAccount]) : q.eq(l.c, id) }
     if (l.somma) {
       try {
-        var righe = await AD.leggi(l.t, 'id,' + l.somma, function (q) { return q.eq(l.c, id) })
+        var righe = await AD.leggi(l.t, l.c + ',' + l.somma, filtro)
         return { n: righe.length, somma: righe.reduce(function (s, r) { return s + (Number(r[l.somma]) || 0) }, 0) }
       } catch (e) { if (e.sessioneAssente || tabellaAssente(e)) throw e /* la somma non è essenziale: sotto si conta e basta */ }
     }
-    return { n: await AD.conta(l.t, function (q) { return q.eq(l.c, id) }, l.col) }
+    return { n: await AD.conta(l.t, filtro, l.c) }
   }
-  async function analizza(tipo, id) {
-    var L = LEGAMI[tipo], esito = { cascata: [], blocca: [], vuota: [], errori: [] }
-    var lavori = []
-    ;['cascata', 'blocca', 'vuota'].forEach(function (gruppo) {
-      L[gruppo].forEach(function (l) {
-        lavori.push(contaLegame(l, id).then(function (r) {
-          if (r.n > 0) esito[gruppo].push({ t: l.t, n: r.n, somma: r.somma, nota: l.nota })
-        }, function (e) {
-          if (e.sessioneAssente) throw e
-          if (!tabellaAssente(e)) esito.errori.push(l.t)
-        }))
+  async function analizza(tipo, id, idAccount) {
+    var elenco = LEGAMI[tipo].legami, esito = { dati: [], errori: [] }
+    await Promise.all(elenco.map(function (l) {
+      return contaLegame(l, id, idAccount).then(function (r) {
+        if (r.n > 0) esito.dati.push({ t: l.t, n: r.n, somma: r.somma })
+      }, function (e) {
+        if (e.sessioneAssente) throw e
+        if (!tabellaAssente(e)) esito.errori.push(l.t)
       })
-    })
-    await Promise.all(lavori)
+    }))
     // sempre nell'ordine dell'elenco, non in quello delle risposte
-    ;['cascata', 'blocca', 'vuota'].forEach(function (gruppo) {
-      var ordine = L[gruppo].map(function (l) { return l.t })
-      esito[gruppo].sort(function (a, b) { return ordine.indexOf(a.t) - ordine.indexOf(b.t) })
-    })
+    var ordine = elenco.map(function (l) { return l.t })
+    esito.dati.sort(function (a, b) { return ordine.indexOf(a.t) - ordine.indexOf(b.t) })
     return esito
   }
   function voce(x) {
     return '<li><strong>' + esc(parole(x.t, x.n)) + '</strong>' +
-      (x.somma != null ? ' (' + esc(numeroOre(x.somma)) + ' ore)' : '') +
-      (x.nota ? ' <span class="dato-sotto">' + esc(x.nota) + '</span>' : '') + '</li>'
+      (x.somma != null ? ' (' + esc(numeroOre(x.somma)) + ' ore)' : '') + '</li>'
   }
   function lista(voci) { return '<ul class="cx-lista">' + voci.map(voce).join('') + '</ul>' }
+
+  // Il rifiuto del database, a parole. Due forme:
+  //   trigger DIR_03: «Non si cancella: dati collegati: giornate (3), spese (1). Si archivia (conservazione 10 anni, CO 958f).»
+  //   chiave esterna: «… violates foreign key constraint "x" on table "spese"» (contatti)
+  function vociRifiuto(messaggio) {
+    var s = String(messaggio || ''), m = s.match(/dati collegati:\s*(.*)/i), voci = []
+    if (m) {
+      var re = /([\w.]+)\s*\((\d+)\)/g, parte = m[1].split(/\.\s/)[0], x
+      while ((x = re.exec(parte))) voci.push({ t: x[1], n: Number(x[2]) })
+      return voci
+    }
+    m = s.match(/on table "([^"]+)"[^"]*$/)
+    return m ? [{ t: m[1] }] : []
+  }
 
   // ── Finestra ──────────────────────────────────────────────────────────────
   var aperta = false, azioni = {}, dopoChiusura = null, giro = 0, occupato = false
@@ -212,7 +230,7 @@ var CX = (function () {
   // ── Il percorso della cancellazione ───────────────────────────────────────
   // o = { tipo, id, nome, elenco:'#persone', archivia: fn | null, giaArchiviato: 'testo' | null,
   //       avvisoAccesso: html | null, primaDi: async fn → funzione per tornare indietro | null,
-  //       file: { bucket, cartella, parole } | null, utente }
+  //       file: { bucket, cartella, parole } | null (solo le foto dei contatti), idAccount: per le colonne ancheAccount, utente }
   function pulsanteArchivia(o) {
     return o.archivia ? bottone('archivia', 'Archivia invece', 'btn-primario', 'lucchetto', 'cx-primo') : ''
   }
@@ -225,7 +243,7 @@ var CX = (function () {
     if (!o.utente || o.utente.ruolo !== 'titolare') return   // il tasto non si vede, e il database rifiuterebbe
     schermo('Cancellare ' + o.nome + '?', '<p class="nota">' + ico('info') + '<span>Controllo i dati collegati…</span></p>', {})
     var g = giro, an
-    try { an = await analizza(o.tipo, o.id) } catch (e) {
+    try { an = await analizza(o.tipo, o.id, o.idAccount) } catch (e) {
       if (e.sessioneAssente) return APP.sessioneScaduta()
       if (g !== giro) return
       return schermo('Cancellare ' + o.nome + '?', AC.avviso('err', '<strong>Non riesco a contare i dati collegati.</strong> ' + esc(e.message)) +
@@ -233,35 +251,34 @@ var CX = (function () {
     }
     if (g !== giro) return
     if (an.errori.length) return schermoErrori(o, an)
-    if (an.blocca.length) return schermoBlocco(o, an)
-    schermoAvviso(o, an)
+    if (an.dati.length) return schermoBlocco(o, an.dati)
+    schermoAvviso(o)
   }
 
-  // Non si sa cosa sparirebbe: non si va avanti. Meglio un tasto in meno che dati persi al buio.
+  // Non si sa cosa c'è collegato: non si va avanti.
   function schermoErrori(o, an) {
     schermo('Non posso mostrarti i dati collegati',
-      AC.avviso('err', '<strong>Non riesco a leggere:</strong> ' + esc(an.errori.map(function (t) { return (PAROLE[t] || [t, t])[1] }).join(', ')) +
-        '. Senza sapere cosa sparisce non cancello. Niente è cambiato.') + notaArchivia(o) +
+      AC.avviso('err', '<strong>Non riesco a leggere:</strong> ' + esc(an.errori.map(function (t) { return parole(t) }).join(', ')) +
+        '. Senza sapere cosa c\'è collegato non cancello. Niente è cambiato.') + notaArchivia(o) +
       '<div class="vela-azioni">' + bottone('riprova', 'Riprova', 'btn-secondario', '', 'cx-primo') + pulsanteArchivia(o) + bottone('chiudi', 'Chiudi', 'btn-secondario', 'chiudi') + '</div>',
       { riprova: function () { cancella(o) }, archivia: archiviaDa(o) })
   }
 
-  function schermoBlocco(o, an, extra) {
+  // Con dati collegati non si cancella: niente campo password, si propone Archivia.
+  // voci può essere vuoto se il database rifiuta senza dire cosa. extra: quel che si deve aggiungere sull'accesso.
+  function schermoBlocco(o, voci, extra) {
     schermo('Non si può cancellare ' + o.nome,
-      (extra || '') +
-      AC.avviso('warn', '<strong>Il database non lo lascia cancellare</strong> finché ci sono questi dati:' + lista(an.blocca) + 'Non serve la password: non cancello niente.') +
+      AC.avviso('warn', (voci.length ? '<strong>Ha dei dati collegati:</strong>' + lista(voci) : '<strong>Ha dei dati collegati.</strong> ') + 'Si conserva per 10 anni (CO 958f).') +
+      (extra ? AC.avviso('warn', extra) : '') +
       (o.archivia ? '<p class="nota">' + ico('lucchetto') + '<span>Archiviare non perde niente: ' + esc(o.cosaArchivia || 'sparisce dagli elenchi, i dati restano') + '.</span></p>' : notaArchivia(o)) +
       '<div class="vela-azioni">' + pulsanteArchivia(o) + bottone('chiudi', 'Chiudi', o.archivia ? 'btn-secondario' : 'btn-primario', 'chiudi', o.archivia ? '' : 'cx-primo') + '</div>',
       { archivia: archiviaDa(o) })
   }
 
-  function schermoAvviso(o, an) {
+  function schermoAvviso(o) {
     var L = LEGAMI[o.tipo], h = ''
     h += AC.avviso('warn', '<strong>Si cancella per sempre.</strong> Non si torna indietro.')
-    h += '<h3 class="cx-sottotitolo">Sparisce</h3>'
-    h += an.cascata.length ? lista(an.cascata) + '<p class="nota"><span>…e ' + esc(L.cosa) + '.</span></p>'
-                           : '<p class="nota"><span>Solo ' + esc(L.cosa) + ': nessun dato collegato.</span></p>'
-    if (an.vuota.length) h += '<h3 class="cx-sottotitolo">Resta, senza collegamento</h3>' + lista(an.vuota)
+    h += '<p class="nota"><span>Solo ' + esc(L.cosa) + ': nessun dato collegato.</span></p>'
     if (o.avvisoAccesso) h += AC.avviso('warn', o.avvisoAccesso)
     h += notaArchivia(o)
     h += '<div class="campo cx-campo" id="campo-cx-password"><label for="cx-password">Riscrivi la tua password per confermare</label>' +
@@ -272,9 +289,9 @@ var CX = (function () {
     h += '<div class="cx-azioni">' + (o.archivia ? bottone('archivia', 'Archivia invece', 'btn-primario', 'lucchetto') : '') +
       bottone('conferma', 'Cancella', 'btn-pericolo', 'togli', 'cx-cancella') + '</div>' +
       '<div class="vela-azioni">' + bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
-    schermo('Cancellare ' + o.nome + '?', h, { archivia: archiviaDa(o), conferma: function () { conferma(o, an) } })
+    schermo('Cancellare ' + o.nome + '?', h, { archivia: archiviaDa(o), conferma: function () { conferma(o) } })
     var p = el('cx-password')
-    if (p) p.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); conferma(o, an) } })
+    if (p) p.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); conferma(o) } })
   }
   function mostraErrore(html) {
     var e = el('cx-errore'); if (!e) return
@@ -282,7 +299,7 @@ var CX = (function () {
     e.scrollIntoView({ block: 'center' })
   }
 
-  async function conferma(o, an) {
+  async function conferma(o) {
     if (occupato) return
     var inp = el('cx-password'); if (!inp) return
     var pw = inp.value
@@ -321,30 +338,24 @@ var CX = (function () {
     try {
       await AD.cancella(LEGAMI[o.tipo].tabella, o.id)
     } catch (e2) {
-      var notaAccesso = ''
+      var sbloccato = false, sbloccoFallito = false
       if (indietro) {
-        try { await indietro(); notaAccesso = ' L\'accesso è tornato com\'era.' } catch (_) {
-          notaAccesso = ' <strong>Attenzione: l\'accesso è rimasto bloccato.</strong> Si sblocca dalla scheda con «Sblocca accesso».'
-        }
+        try { await indietro(); sbloccato = true } catch (_) { sbloccoFallito = true }
         ricaricaTutto()
       }
       if (e2.sessioneAssente) return APP.sessioneScaduta()
       occupa(false)
-      var vincolo = String(e2.codice || '') === '23503' || /foreign key/i.test(e2.message)
-      if (vincolo) {
-        var m = String(e2.message).match(/on table "([^"]+)"[^"]*$/)
-        var t = m ? m[1] : 'altri dati'
-        return schermo('Non si può cancellare ' + o.nome,
-          AC.avviso('warn', '<strong>Il database ha rifiutato:</strong> è ancora collegato a «' + esc((PAROLE[t] || [t, t])[1]) + '». Non è cambiato niente.' + notaAccesso) +
-          '<div class="vela-azioni">' + pulsanteArchivia(o) + bottone('chiudi', 'Chiudi', o.archivia ? 'btn-secondario' : 'btn-primario', 'chiudi', o.archivia ? '' : 'cx-primo') + '</div>',
-          { archivia: archiviaDa(o) })
+      var notaAccesso = sbloccoFallito ? '<strong>Attenzione: l\'accesso è rimasto bloccato.</strong> Si sblocca dalla scheda con «Sblocca accesso».'
+                                       : (sbloccato ? 'L\'accesso è tornato com\'era.' : '')
+      if (String(e2.codice || '') === '23503' || /foreign key/i.test(e2.message)) {
+        return schermoBlocco(o, vociRifiuto(e2.message), (sbloccoFallito ? '' : 'Non è cambiato niente. ') + notaAccesso)
       }
-      return mostraErrore('<strong>NON cancellato.</strong> ' + esc(e2.message) + notaAccesso)
+      return mostraErrore('<strong>NON cancellato.</strong> ' + esc(e2.message) + (notaAccesso ? ' ' + notaAccesso : ''))
     }
-    await fatto(o, an)
+    await fatto(o)
   }
 
-  async function fatto(o, an) {
+  async function fatto(o) {
     var note = '', tipo = 'ok'
     if (o.file) {
       var f = await AD.togliCartella(o.file.bucket, o.file.cartella)
@@ -361,10 +372,9 @@ var CX = (function () {
     if (!registrata) { tipo = 'warn'; note += '<p class="nota">' + ico('attenzione') + '<span><strong>Non trovo la riga nel Registro cancellazioni.</strong> Controllalo e avvisa chi gestisce il database.</span></p>' }
     ricaricaTutto()
     var elenco = o.elenco
-    var quanti = an.cascata.length ? '<h3 class="cx-sottotitolo">Sparito con lui</h3>' + lista(an.cascata) : ''
     schermo('Cancellato',
       AC.avviso(tipo, '<strong>' + esc(o.nome) + '</strong> è stato cancellato.' + (registrata ? ' È scritto nel Registro cancellazioni.' : '')) +
-      quanti + (o.notaFatto ? '<p class="nota">' + ico('lucchetto') + '<span>' + esc(o.notaFatto) + '</span></p>' : '') + note +
+      (o.notaFatto ? '<p class="nota">' + ico('lucchetto') + '<span>' + esc(o.notaFatto) + '</span></p>' : '') + note +
       '<div class="vela-azioni">' + bottone('chiudi', 'Chiudi', 'btn-primario', 'chiudi', 'cx-primo') + bottone('registro', 'Apri il Registro cancellazioni', 'btn-secondario', 'documento') + '</div>',
       { registro: function () { dopoChiusura = function () { location.hash = '#registro' }; chiudi() } },
       function () { location.hash = elenco })
