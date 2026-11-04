@@ -141,6 +141,9 @@ var AC = (function () {
     return { stato: 'ok', testo: 'Scade il ' + data(iso) }
   }
 
+  // In Archivio = tolta con attivo = false, o fine rapporto già passata. Oggi è l'ultimo giorno: non è ancora in Archivio.
+  function inArchivio(o, oggi) { return !!o && (o.attivo === false || (!!o.data_fine_rapporto && o.data_fine_rapporto < (oggi || oggiIso()))) }
+
   function telLink(n, scritta) {
     var t = String(n || '').replace(/[^\d+]/g, '')
     return t ? '<a class="btn btn-secondario btn-piccolo" href="tel:' + esc(t) + '">' + ico('telefono') + '<span>' + esc(scritta || 'Chiama') + '</span></a>' : ''
@@ -158,6 +161,6 @@ var AC = (function () {
     esc: esc, el: el, ico: ico, avviso: avviso,
     opzioniPaese: opzioniPaese, nomePaese: nomePaese, PAESE_PREDEFINITO: PAESE_PREDEFINITO,
     data: data, nomeContatto: nomeContatto, normale: normale,
-    oggiIso: oggiIso, giorniDaOggi: giorniDaOggi, scadenza: scadenza, telLink: telLink, eFornitore: eFornitore
+    oggiIso: oggiIso, giorniDaOggi: giorniDaOggi, inArchivio: inArchivio, scadenza: scadenza, telLink: telLink, eFornitore: eFornitore
   }
 })()

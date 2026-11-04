@@ -212,7 +212,36 @@ var AD = (function () {
     } catch (e) { return { file: 0, tolti: 0, errore: e.message } }
   }
 
+  // Toglie un elenco di file [{ bucket, percorso }] e dice file per file com'è andata. Non lancia per un file che non si toglie.
+  // Storage può negare in silenzio (nessun errore, file non tolto): quello non restituito si cerca nella sua cartella.
+  // Un file che non c'è già più conta come tolto: così un secondo tentativo si può sempre fare.
+  async function togliFileElenco(elenco) {
+    await richiediSessione()
+    var esito = { tolti: [], rimasti: [] }, perBucket = {}
+    ;(elenco || []).forEach(function (f) { (perBucket[f.bucket] = perBucket[f.bucket] || []).push(f.percorso) })
+    for (var bucket in perBucket) {
+      var percorsi = perBucket[bucket], r = null, motivo = null
+      try { r = await sb.storage.from(bucket).remove(percorsi) } catch (e) { motivo = e.message }
+      if (r && r.error) motivo = r.error.message || 'non tolto'
+      var fatti = ((r && r.data) || []).map(function (x) { return x.name })
+      for (var i = 0; i < percorsi.length; i++) {
+        var p = percorsi[i]
+        if (fatti.indexOf(p) >= 0) { esito.tolti.push({ bucket: bucket, percorso: p }); continue }
+        var taglio = p.lastIndexOf('/'), cartella = taglio >= 0 ? p.slice(0, taglio) : '', nome = p.slice(taglio + 1), ancora = true, m2 = motivo
+        try {
+          var l = await sb.storage.from(bucket).list(cartella, { limit: 100, search: nome })
+          if (l.error) m2 = m2 || l.error.message
+          else ancora = (l.data || []).some(function (x) { return x.name === nome })
+        } catch (e2) { m2 = m2 || e2.message }
+        if (ancora) esito.rimasti.push({ bucket: bucket, percorso: p, motivo: m2 || 'il database non lo ha tolto' })
+        else esito.tolti.push({ bucket: bucket, percorso: p })
+      }
+    }
+    return esito
+  }
+
   return {
+    togliFileElenco: togliFileElenco,
     sb: sb, sessione: sessione, richiediSessione: richiediSessione, entra: entra, esci: esci, ruolo: ruolo, verificaPassword: verificaPassword,
     leggi: leggi, conta: conta, inserisci: inserisci, aggiorna: aggiorna,
     colonnaMancante: colonnaMancante, leggiConRiserva: leggiConRiserva, aggiornaDove: aggiornaDove, upsert: upsert,

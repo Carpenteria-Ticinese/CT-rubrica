@@ -10,7 +10,7 @@
        lo impedisce: un Esterno non può avere user_id).
      · «agenzia» (interinali) è un'altra cosa: resta com'è, solo per i Dipendenti.
    - Anagrafiche NON legge e NON scrive paghe (tm_paghe_*): stanno in Paghe. Unica eccezione: prima di
-     cancellare una persona il titolare vede QUANTE buste paga sparirebbero (solo il numero, js/cancella.js).
+     cancellare una persona il titolare vede QUANTE buste paga la bloccano (solo il numero, js/cancella.js).
    - «attivo» non si scrive a mano: attivo = fine rapporto vuota, oggi o futura
      (come App Cantieri e Calendario).
    - Dati personali: solo qui, mai in operai. «Niente dati sanitari».
@@ -18,7 +18,16 @@
      mai il nome della persona. Toglie un documento solo il titolare.
    - Accesso: «Dai accesso» = salva l'email nella scheda → anag_collega_account →
      (solo se serve) crea-collaboratore → anag_collega_account. Mai due account.
-   - Chi esce si ARCHIVIA: tasto «Archivia» = fine rapporto (ultimo giorno), resta tra «chi non lavora più con noi».
+   - ARCHIVIO (v9, Umberto 4.11.2026): chi ha la fine rapporto passata (o attivo = false) va in Archivio: sparisce dagli
+     elenchi, si vede solo con il filtro «Mostra archivio». Storico intatto. Tasto «Archivia» = scrive la fine rapporto (ultimo giorno).
+   - ESISTE GIÀ → RIATTIVA (v9): inserendo una persona si controlla nome + cognome + nascita, email, telefono, anche in
+     Archivio. Solo avviso: con «È un'altra persona» si salva. Omonimo senza conferma = avviso, senza «Riattiva».
+     Riattiva = anag_riattiva_persona (SQL ANAG_10): il periodo vecchio va in anag_periodi_rapporto, nuova data di inizio,
+     fine rapporto tolta, tutto o niente. L'account bloccato RESTA bloccato: lo si dice a schermo.
+     Data di inizio futura: avviso, non blocco.
+   - PERIODI SBAGLIATI (v9, Umberto 4.11.2026): li corregge o li toglie SOLO il titolare, dopo aver riscritto la password,
+     con anag_correggi_periodo / anag_togli_periodo. Prima e dopo vanno in anag_registro_periodi, che vede solo lui (#registro).
+     Il responsabile non vede i tasti e il database lo rifiuta. Il motivo di uscita lo vedono titolare e responsabile.
      «Cancella» (v7): solo il titolare, con password, avviso e registro (js/cancella.js). La scheda di un account
      titolare e la propria non si cancellano (si guarda user_id e ruolo, mai il nome). Chi ha un account:
      l'accesso si blocca PRIMA di cancellare, finché c'è il legame («Blocca accesso», stessa funzione).
@@ -41,6 +50,7 @@ var PS = (function () {
   var COL_DOC = COL_DOC_VECCHIE + ',file_path'
   var COL_DP = 'operaio_id,data_nascita,via,cap,localita,numero_avs,permesso_tipo,permesso_scadenza,motivo_uscita,note_riservate'
   var COL_CE = 'id,operaio_id,nome,telefono,relazione,created_at'
+  var COL_PERIODI = 'id,operaio_id,data_inizio,data_fine,motivo_uscita,fatto_da,fatto_il'
   var BUCKET_DOC = 'tm-documenti'
 
   var MANSIONI = ['Carpentiere', 'Caposquadra', 'Responsabile cantiere', 'Operaio generico', 'Apprendista', 'Magazziniere', 'Lattoniere', 'Titolare']
@@ -55,6 +65,7 @@ var PS = (function () {
     confermaFine: false,
     cerca: '', mostraEx: false,
     dp: {}, ce: {},                 // per persona: dati personali, contatti d'emergenza (caricati quando si apre la scheda)
+    periodi: {}, periodiErrore: null, // per persona: periodi di rapporto chiusi (ANAG_10)
     form: null, messaggio: null, utente: null,
     esitoAccesso: null               // email e password da comunicare (solo a schermo, una volta)
   }
@@ -89,14 +100,22 @@ var PS = (function () {
     }
     ST.caricato = true
   }
-  function scarta() { ST.form = null; ST.salvaComunque = false; ST.confermaFine = false }
-  function svuota() { ST.operai = []; ST.contatti = []; ST.documenti = []; ST.profili = []; ST.accessi = null; ST.caricato = false; ST.dp = {}; ST.ce = {}; ST.form = null; ST.esitoAccesso = null }
+  function scarta() { ST.form = null; ST.salvaComunque = false; ST.confermaFine = false; ST.confermaTogliFine = false }
+  function svuota() { ST.operai = []; ST.contatti = []; ST.documenti = []; ST.profili = []; ST.accessi = null; ST.caricato = false; ST.dp = {}; ST.ce = {}; ST.periodi = {}; ST.periodiErrore = null; ST.form = null; ST.esitoAccesso = null; ST.mostraEx = false; ST.cerca = '' }
 
   function perId(id) { return ST.operai.filter(function (o) { return o.id === id })[0] || null }
   function contatto(id) { return ST.contatti.filter(function (k) { return k.id === id })[0] || null }
   function nome(o) { return [o.nome, o.cognome].filter(Boolean).join(' ').trim() || '(senza nome)' }
   function eEsterno(o) { return o && o.rapporto === 'esterno' }
-  function attiva(o, oggi) { return o.attivo !== false && (!o.data_fine_rapporto || o.data_fine_rapporto >= (oggi || AC.oggiIso())) }
+  function attiva(o, oggi) { return !AC.inArchivio(o, oggi) }
+  // «in archivio dal …» = dal giorno dopo l'ultimo giorno di lavoro. Tolta con attivo = false senza data: niente data.
+  function testoArchivio(o, maiuscola) {
+    var t = o.data_fine_rapporto && o.data_fine_rapporto < AC.oggiIso() ? 'in archivio dal ' + AC.data(giornoDopo(o.data_fine_rapporto)) : 'in archivio'
+    return maiuscola ? 'I' + t.slice(1) : t
+  }
+  function periodoTesto(inizio, fine) {
+    return (inizio ? 'dal ' + AC.data(inizio) : 'inizio non scritto') + (fine ? ' al ' + AC.data(fine) : '')
+  }
   function profilo(uid) { return ST.profili.filter(function (p) { return p.id === uid })[0] || null }
   function statoAccesso(o) {
     if (!o.user_id) return { tipo: 'nessuno' }
@@ -185,7 +204,8 @@ var PS = (function () {
     return '<button type="button" class="riga' + (scelta ? ' riga-scelta' : '') + '" data-apri-persona="' + esc(o.id) + '">' +
       '<span class="riga-testo"><span class="riga-nome">' + esc(nome(o)) + '</span>' +
       (sotto ? '<span class="riga-sotto">' + esc(sotto) + '</span>' : '') +
-      '<span class="riga-badge">' + (eEsterno(o) ? badgeRapporto(o) : '') + badgeAccesso(o) + badgeDocumenti(o) + '</span></span>' +
+      '<span class="riga-badge">' + (attiva(o) ? '' : '<span class="badge st-senza">' + ico('lucchetto') + ' ' + esc(testoArchivio(o, true)) + '</span>') +
+      (eEsterno(o) ? badgeRapporto(o) : '') + badgeAccesso(o) + badgeDocumenti(o) + '</span></span>' +
       '</button>'
   }
 
@@ -220,10 +240,13 @@ var PS = (function () {
     h += '<div class="elenco">' + (est.length ? est.map(function (o) { return rigaPersona(o, o.id === idScelto) }).join('')
           : '<div class="vuoto">' + (ST.cerca ? 'Nessun esterno per «' + esc(ST.cerca) + '».' : 'Nessun esterno. Con «Nuova persona» scegli «Esterno».') + '</div>') + '</div>'
 
-    if (ex.length) {
-      h += '<button type="button" class="btn btn-secondario btn-largo btn-sezione" data-ps-azione="ex" aria-expanded="' + ST.mostraEx + '">' +
-           ico(ST.mostraEx ? 'chiudi' : 'persone') + '<span>' + (ST.mostraEx ? 'Nascondi' : 'Mostra') + ' chi non lavora più con noi (' + ex.length + ')</span></button>'
-      if (ST.mostraEx) h += '<div class="elenco elenco-ex">' + ex.map(function (o) { return rigaPersona(o, o.id === idScelto) }).join('') + '</div>'
+    // Archivio: solo con il filtro. Il numero c'è sempre, anche cercando: se la persona è lì, si vede subito.
+    h += '<button type="button" class="btn btn-secondario btn-largo btn-sezione" data-ps-azione="ex" aria-expanded="' + ST.mostraEx + '">' +
+         ico(ST.mostraEx ? 'chiudi' : 'lucchetto') + '<span>' + (ST.mostraEx ? 'Nascondi' : 'Mostra') + ' archivio (' + ex.length + ')</span></button>'
+    if (ST.mostraEx) {
+      h += '<h2 class="sezione-titolo">' + ico('lucchetto') + 'Archivio <span class="sezione-nota">non lavorano più con noi · ' + ex.length + '</span></h2>'
+      h += '<div class="elenco elenco-ex">' + (ex.length ? ex.map(function (o) { return rigaPersona(o, o.id === idScelto) }).join('')
+            : '<div class="vuoto">' + (ST.cerca ? 'Nessuno in archivio per «' + esc(ST.cerca) + '».' : 'Nessuno in archivio.') + '</div>') + '</div>'
     }
     el('pane-elenco').innerHTML = h
     var c = el('ps-cerca')
@@ -251,7 +274,7 @@ var PS = (function () {
     var o = perId(id)
     if (!o) { pane.innerHTML = AC.avviso('warn', 'Questa persona non c\'è (o non è leggibile). <a href="#persone">Torna all\'elenco</a>.'); return }
     var oggi = AC.oggiIso()
-    var h = testata(nome(o), badgeRapporto(o) + (attiva(o, oggi) ? '' : '<span class="badge st-senza">Non lavora più con noi</span>'),
+    var h = testata(nome(o), badgeRapporto(o) + (attiva(o, oggi) ? '' : '<span class="badge st-senza">' + ico('lucchetto') + ' ' + esc(testoArchivio(o, true)) + '</span>'),
       '<a class="btn btn-primario" href="#persona/' + esc(o.id) + '/modifica">' + ico('modifica') + '<span>Modifica</span></a>')
     if (ST.messaggio) { h += AC.avviso(ST.messaggio.tipo, ST.messaggio.html); ST.messaggio = null }
 
@@ -276,6 +299,7 @@ var PS = (function () {
       (!eEsterno(o) && o.agenzia ? dato('Agenzia (interinale)', esc(o.nome_agenzia || 'sì')) : '') +
       '</div>'
 
+    h += '<div id="ps-periodi"></div>'
     h += '<div id="ps-accesso">' + htmlAccesso(o) + '</div>'
     h += '<div id="ps-dp"><div class="blocco"><p class="nota">Carico i dati personali…</p></div></div>'
     h += '<div id="ps-ce"></div>'
@@ -299,6 +323,153 @@ var PS = (function () {
       if (e.sessioneAssente) return APP.sessioneScaduta()
       var z = el('ps-dp'); if (z) z.innerHTML = AC.avviso('err', 'Dati personali e contatti d\'emergenza NON caricati: ' + esc(e.message))
     }
+    await caricaPeriodi(o)
+  }
+  // Periodi di rapporto chiusi (ANAG_10). Tabella assente = SQL non applicato: nessun periodo da mostrare, Riattiva lo dirà.
+  async function caricaPeriodi(o) {
+    try {
+      ST.periodi[o.id] = await AD.leggi('anag_periodi_rapporto', COL_PERIODI, function (q) { return q.eq('operaio_id', o.id) })
+      ST.periodiErrore = null
+    } catch (e) {
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      ST.periodi[o.id] = []
+      ST.periodiErrore = tabellaAssente(e) ? null : e.message
+    }
+    var x = el('ps-periodi'); if (x) x.innerHTML = htmlPeriodi(o)
+  }
+  function tabellaAssente(e) { return /^(PGRST205|42P01)$/.test(String(e && e.codice || '')) || /could not find the table|relation .* does not exist/i.test(String(e && e.message || '')) }
+  function funzioneAssente(e) { return /^(PGRST202|42883)$/.test(String(e && e.codice || '')) || /could not find the function|function .* does not exist/i.test(String(e && e.message || '')) }
+  function htmlPeriodi(o) {
+    if (ST.periodiErrore) return AC.avviso('err', '<strong>Periodi di rapporto NON caricati.</strong> ' + esc(ST.periodiErrore))
+    var lista = (ST.periodi[o.id] || []).slice().sort(function (a, b) { return String(b.fatto_il).localeCompare(String(a.fatto_il)) })
+    if (!lista.length) return ''
+    return '<div class="blocco" id="ps-periodi-box"><h3 class="blocco-titolo">' + ico('documento') + 'Periodi di rapporto</h3>' +
+      dato(attiva(o) ? 'Periodo in corso' : 'Ultimo periodo', esc(periodoTesto(o.data_assunzione, o.data_fine_rapporto))) +
+      lista.map(function (p) {
+        var chi = p.fatto_da ? ((profilo(p.fatto_da) || {}).nome || 'account non più presente') : 'non segnato'
+        return dato('Periodo vecchio', esc(periodoTesto(p.data_inizio, p.data_fine)) +
+          (p.motivo_uscita ? '<span class="dato-sotto">Motivo uscita: ' + esc(p.motivo_uscita) + '</span>' : '') +
+          '<span class="dato-sotto">Riattivato il ' + esc(AC.data(p.fatto_il)) + ' da ' + esc(chi) + '</span>' +
+          (ST.utente && ST.utente.ruolo === 'titolare' ? '<div class="azioni-riga">' +
+            '<button type="button" class="btn btn-secondario" data-ps-periodo-correggi="' + esc(p.id) + '">' + ico('modifica') + '<span>Correggi</span></button>' +
+            '<button type="button" class="btn btn-secondario" data-ps-periodo-togli="' + esc(p.id) + '">' + ico('togli') + '<span>Togli</span></button></div>' : ''))
+      }).join('') + '</div>'
+  }
+
+  // ── Periodo sbagliato: solo il titolare, con la password (come js/cancella.js) ──────────
+  // La password passa solo da AD.verificaPassword: non si salva, il campo si svuota SEMPRE. Sta nella finestra, fuori dal modulo.
+  function campoPasswordPeriodo() {
+    return '<div class="campo cx-campo" id="campo-cx-password"><label for="cx-password">Riscrivi la tua password per confermare</label>' +
+      '<div class="dato-sotto" id="cx-chi">Login in uso: ' + esc(ST.utente.email) + '</div>' +
+      '<input id="cx-password" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false">' +
+      '<div class="campo-aiuto">La password non viene salvata né mostrata.</div></div><div id="cx-errore"></div>'
+  }
+  function erroreFinestra(html) {
+    var e = el('cx-errore'); if (!e) return
+    e.innerHTML = AC.avviso('err', html)
+    e.scrollIntoView({ block: 'center' })
+  }
+  function finestraOccupata(si) {
+    var box = el('cx-scatola'); if (box) box.querySelectorAll('button,input').forEach(function (x) { x.disabled = si })
+  }
+  // Controlla la password e il ruolo, poi fa il lavoro. Se qualcosa non va non cambia niente e lo dice.
+  async function conPasswordPeriodo(o, lavoro, fatto) {
+    var inp = el('cx-password'); if (!inp) return
+    var pw = inp.value
+    inp.value = ''
+    el('cx-errore').innerHTML = ''
+    if (!pw) { erroreFinestra('Scrivi la password.'); inp.focus(); return }
+    finestraOccupata(true)
+    try {
+      var giusta = await AD.verificaPassword(pw)
+      pw = null
+      if (!giusta) {
+        finestraOccupata(false)
+        erroreFinestra('<strong>Password sbagliata.</strong> Non ho cambiato niente.')
+        var i2 = el('cx-password'); if (i2) i2.focus()
+        return
+      }
+      var chi = await AD.ruolo()
+      if (chi.ruolo !== 'titolare') throw new Error('Solo il titolare può correggere un periodo.')
+      await lavoro()
+    } catch (e) {
+      pw = null
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      finestraOccupata(false)
+      return erroreFinestra('<strong>Non ho cambiato niente.</strong> ' + esc(funzioneAssente(e) ? 'il database non è ancora aggiornato (manca l\'SQL ANAG_10).' : spiega(e)))
+    }
+    delete ST.periodi[o.id]
+    ST.messaggio = { tipo: 'ok', html: fatto }
+    await CX.chiudi()
+    await ridisegnaPersona(o.id)
+  }
+  function apriCorreggiPeriodo(o, p) {
+    var corpo = '<p>Di <strong>' + esc(nome(o)) + '</strong>. Oggi: ' + esc(periodoTesto(p.data_inizio, p.data_fine)) + '. Nel Registro resta com\'era e com\'è dopo.</p>' +
+      '<div class="campi-due campi-pari">' + campo('cx-p-inizio', 'Inizio', input('cx-p-inizio', p.data_inizio, '', 'date')) + campo('cx-p-fine', 'Ultimo giorno', input('cx-p-fine', p.data_fine, '', 'date')) + '</div>' +
+      campo('cx-p-motivo', 'Motivo uscita', input('cx-p-motivo', p.motivo_uscita, ' autocomplete="off" maxlength="200"')) +
+      campoPasswordPeriodo() +
+      '<div class="vela-azioni">' + CX.bottone('salva', 'Correggi il periodo', 'btn-primario', 'salva') + CX.bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
+    CX.schermo('Correggi il periodo', corpo, {
+      salva: function () {
+        var ini = el('cx-p-inizio').value || null, fin = el('cx-p-fine').value || null, mot = el('cx-p-motivo').value.trim() || null
+        if (ini && fin && fin < ini) { el('cx-password').value = ''; return erroreFinestra('L\'ultimo giorno viene prima dell\'inizio.') }
+        if (ini === (p.data_inizio || null) && fin === (p.data_fine || null) && mot === (p.motivo_uscita || null)) { el('cx-password').value = ''; return erroreFinestra('Non hai cambiato niente.') }
+        return conPasswordPeriodo(o, function () {
+          return AD.rpc('anag_correggi_periodo', { p_periodo: p.id, p_inizio: ini, p_fine: fin, p_motivo: mot })
+        }, 'Periodo corretto: ' + esc(periodoTesto(ini, fin)) + '. Com\'era prima è scritto nel Registro.')
+      }
+    })
+  }
+  function apriTogliPeriodo(o, p) {
+    var corpo = AC.avviso('warn', '<strong>Il periodo ' + esc(periodoTesto(p.data_inizio, p.data_fine)) + ' sparisce dalla scheda di ' + esc(nome(o)) + '.</strong> Ore, buste paga e documenti non si toccano. Nel Registro resta com\'era.') +
+      campoPasswordPeriodo() +
+      '<div class="vela-azioni">' + CX.bottone('salva', 'Togli il periodo', 'btn-pericolo', 'togli') + CX.bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
+    CX.schermo('Togli il periodo', corpo, {
+      salva: function () {
+        return conPasswordPeriodo(o, function () { return AD.rpc('anag_togli_periodo', { p_periodo: p.id }) },
+          'Periodo tolto: ' + esc(periodoTesto(p.data_inizio, p.data_fine)) + '. Com\'era è scritto nel Registro.')
+      }
+    })
+  }
+  function periodoAperto(id) {
+    var o = perId(aperto), p = o && (ST.periodi[o.id] || []).filter(function (x) { return x.id === id })[0]
+    return o && p ? { o: o, p: p } : null
+  }
+
+  // Sezione del Registro (#registro), sotto le cancellazioni. Solo il titolare. Tabella assente = SQL non applicato: niente da mostrare.
+  async function mostraRegistroPeriodi(utente) {
+    if (!utente || utente.ruolo !== 'titolare' || !/^#registro/.test(location.hash)) return
+    var righe, profili = []
+    var titolo = '<h2 class="sezione-titolo" id="ps-reg-periodi">' + ico('documento') + 'Correzioni ai periodi di rapporto'
+    function mostra(h) { var pane = el('pane-elenco'); if (pane && /^#registro/.test(location.hash)) pane.insertAdjacentHTML('beforeend', h) }
+    try {
+      righe = await AD.leggi('anag_registro_periodi', 'id,quando,chi,azione,nome,prima,dopo')
+    } catch (e) {
+      if (e.sessioneAssente) throw e
+      if (tabellaAssente(e)) return
+      return mostra(titolo + '</h2>' + AC.avviso('err', '<strong>Non riesco a leggere le correzioni.</strong> ' + esc(e.message)))
+    }
+    try { profili = await AD.leggi('profili', 'id,nome') } catch (e2) { if (e2.sessioneAssente) throw e2 /* senza nomi: «titolare» */ }
+    function chiE(r) {
+      if (r.chi === utente.id) return 'tu (' + utente.email + ')'
+      var x = profili.filter(function (q) { return q.id === r.chi })[0]
+      return (x && x.nome) || 'titolare'
+    }
+    function fotoPeriodo(j) {
+      return j ? periodoTesto(j.data_inizio, j.data_fine) + (j.motivo_uscita ? ' · motivo: ' + j.motivo_uscita : '') : ''
+    }
+    function quando(iso) {
+      var d = new Date(iso); if (isNaN(d)) return String(iso || '')
+      var due = function (n) { return String(n).padStart(2, '0') }
+      return due(d.getDate()) + '.' + due(d.getMonth() + 1) + '.' + d.getFullYear() + ' alle ' + due(d.getHours()) + ':' + due(d.getMinutes())
+    }
+    righe.sort(function (a, b) { return String(b.quando).localeCompare(String(a.quando)) })
+    mostra(titolo + ' <span class="sezione-nota">' + righe.length + '</span></h2>' +
+      (righe.length ? righe.map(function (r) {
+        return '<div class="blocco ps-reg-riga"><h3 class="blocco-titolo">' + esc(r.azione === 'tolto' ? 'Periodo tolto' : 'Periodo corretto') + ': ' + esc(r.nome || '(senza nome)') + '</h3>' +
+          dato('Quando', esc(quando(r.quando))) + dato('Chi', esc(chiE(r))) + dato('Com\'era prima', esc(fotoPeriodo(r.prima))) +
+          dato('Com\'è dopo', r.dopo ? esc(fotoPeriodo(r.dopo)) : 'tolto') + '</div>'
+      }).join('') : '<div class="vuoto" id="ps-reg-vuoto"><p>Nessuna correzione.</p></div>'))
   }
 
   // ── Archivia / Cancella (v7) ──────────────────────────────────────────────
@@ -325,8 +496,8 @@ var PS = (function () {
         az += '<button type="button" class="btn btn-primario" data-ps-azione="archivia">' + ico('lucchetto') + '<span>Archivia</span></button>'
       }
     } else {
-      h += '<p class="nota">' + ico('lucchetto') + '<span>Archiviata: è fra «chi non lavora più con noi».' + (o.data_fine_rapporto ? ' Ultimo giorno ' + esc(AC.data(o.data_fine_rapporto)) + '.' : '') + '</span></p>'
-      if (o.attivo !== false) az += '<button type="button" class="btn btn-secondario" data-ps-azione="rimetti">' + ico('persone') + '<span>Rimetti fra gli attivi</span></button>'
+      h += '<p class="nota">' + ico('lucchetto') + '<span>Archiviata: è in Archivio.' + (o.data_fine_rapporto ? ' Ultimo giorno ' + esc(AC.data(o.data_fine_rapporto)) + '.' : '') + ' Ore, buste paga e documenti restano. Se torna a lavorare: «Riattiva».</span></p>'
+      az += '<button type="button" class="btn btn-primario" data-ps-riattiva="' + esc(o.id) + '">' + ico('persone') + '<span>Riattiva</span></button>'
     }
     if (ST.utente && ST.utente.ruolo === 'titolare') {
       var no = noCancella(o)
@@ -344,8 +515,8 @@ var PS = (function () {
   }
   function apriArchivia(o) {
     var oggi = AC.oggiIso(), acc = o.user_id && !schedaMiaOTitolare(o)
-    var corpo = '<p>Resta fra «chi non lavora più con noi», con tutti i suoi dati. Niente si perde: si può rimettere fra gli attivi.</p>' +
-      campo('cx-fine', 'Ultimo giorno di lavoro', input('cx-fine', o.data_fine_rapporto || oggi, '', 'date'), 'Dal giorno dopo non compare più negli elenchi di lavoro.', true) +
+    var corpo = '<p>Va in Archivio con tutti i suoi dati. Niente si perde: se torna, si riattiva.</p>' +
+      campo('cx-fine', 'Ultimo giorno di lavoro', input('cx-fine', o.data_fine_rapporto || oggi, '', 'date'), 'Dal giorno dopo va in Archivio: sparisce dagli elenchi di lavoro.', true) +
       (acc ? AC.avviso('warn', 'Ha un accesso alle app: si blocca da solo dal giorno dopo (se la data è già passata, subito).') : '') +
       '<div id="cx-archivia-msg"></div><div class="vela-azioni">' + CX.bottone('salva', 'Archivia', 'btn-primario', 'lucchetto', 'cx-primo') + CX.bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
     CX.schermo('Archivia ' + nome(o), corpo, {
@@ -356,7 +527,8 @@ var PS = (function () {
         if (o.data_assunzione && d < o.data_assunzione) { msg.innerHTML = AC.avviso('err', 'L\'ultimo giorno è prima dell\'inizio (' + esc(AC.data(o.data_assunzione)) + ').'); return }
         try {
           await AD.aggiorna('operai', o.id, { data_fine_rapporto: d }, ST.sqlEsterni ? COL_OPERAI : COL_OPERAI_VECCHIE)
-          ST.messaggio = { tipo: 'ok', html: '<strong>' + esc(nome(o)) + '</strong> archiviato: ultimo giorno ' + esc(AC.data(d)) + '. I dati restano tutti.' }
+          ST.messaggio = { tipo: 'ok', html: '<strong>' + esc(nome(o)) + '</strong> archiviato: ultimo giorno ' + esc(AC.data(d)) + '. I dati restano tutti. ' +
+            (d < oggi ? 'È già in Archivio.' : 'Dal ' + esc(AC.data(giornoDopo(d))) + ' è in Archivio.') }
           await CX.chiudi()
           await ridisegnaPersona(o.id)
         } catch (e) {
@@ -366,16 +538,56 @@ var PS = (function () {
       }
     })
   }
-  async function rimetti(o) {
-    var box = el('ps-fine-msg')
-    try {
-      await AD.aggiorna('operai', o.id, { data_fine_rapporto: null }, ST.sqlEsterni ? COL_OPERAI : COL_OPERAI_VECCHIE)
-      ST.messaggio = { tipo: 'ok', html: 'Rimesso fra gli attivi.' }
-      await ridisegnaPersona(o.id)
-    } catch (e) {
-      if (e.sessioneAssente) return APP.sessioneScaduta()
-      if (box) box.innerHTML = AC.avviso('err', '<strong>NON salvato.</strong> ' + esc(spiega(e)))
+  // Riattiva (v9): dalla scheda in Archivio o dal modulo («Esiste già»). da = { modulo: true, inizio: data scritta nel modulo }.
+  // Tutto nel database, in una sola transazione (anag_riattiva_persona). L'account non si tocca mai.
+  function apriRiattiva(o, da) {
+    da = da || {}
+    var s = statoAccesso(o), bloccato = !!o.user_id && s.tipo === 'bloccato'
+    var corpo = '<p>Resta tutto: ore, buste paga, documenti. Il periodo vecchio (' + esc(periodoTesto(o.data_assunzione, o.data_fine_rapporto)) + ') resta scritto nella scheda.</p>' +
+      campo('cx-inizio', 'Nuova data di inizio', input('cx-inizio', da.inizio || AC.oggiIso(), '', 'date'), '', true) +
+      '<div id="cx-riattiva-futuro"></div>' +
+      (bloccato ? AC.avviso('warn', testoAccessoBloccato()) : '') +
+      (da.modulo ? '<p class="nota">' + ico('info') + '<span>Quello che hai scritto nel modulo non si salva: restano i dati della scheda vecchia. Dopo li controlli con «Modifica».</span></p>' : '') +
+      '<div id="cx-riattiva-msg"></div><div class="vela-azioni">' + CX.bottone('salva', 'Riattiva', 'btn-primario', 'persone', 'cx-primo') + CX.bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
+    CX.schermo('Riattiva ' + nome(o), corpo, {
+      salva: async function (bottone) {
+        var d = el('cx-inizio').value, msg = el('cx-riattiva-msg')
+        msg.innerHTML = ''
+        if (!d) { msg.innerHTML = AC.avviso('err', 'Scrivi la nuova data di inizio.'); return }
+        if (o.data_fine_rapporto && d <= o.data_fine_rapporto) { msg.innerHTML = AC.avviso('err', 'La nuova data di inizio deve venire dopo l\'ultimo giorno del periodo vecchio (' + esc(AC.data(o.data_fine_rapporto)) + ').'); return }
+        if (o.data_assunzione && d <= o.data_assunzione) { msg.innerHTML = AC.avviso('err', 'La nuova data di inizio deve venire dopo l\'inizio del periodo vecchio (' + esc(AC.data(o.data_assunzione)) + ').'); return }
+        if (bottone) bottone.disabled = true
+        try {
+          var r = await AD.rpc('anag_riattiva_persona', { p_operaio: o.id, p_inizio: d })
+          var fermo = r && r.account_bloccato === true
+          ST.messaggio = { tipo: fermo ? 'warn' : 'ok', html: '<strong>' + esc(nome(o)) + '</strong> riattivato: nuova data di inizio ' + esc(AC.data(d)) + '. Ore, buste paga e documenti restano; il periodo vecchio è nella scheda.' +
+            (d > AC.oggiIso() ? ' La data è nel futuro: risulta già fra gli attivi.' : '') +
+            (fermo ? '<br>' + testoAccessoBloccato() : '') }
+          delete ST.dp[o.id]; delete ST.periodi[o.id]
+          if (da.modulo) scarta()
+          await CX.chiudi()
+          if (da.modulo) { ST.caricato = false; APP.libera(); location.hash = '#persona/' + o.id; return }
+          await ridisegnaPersona(o.id)
+        } catch (e) {
+          if (e.sessioneAssente) return APP.sessioneScaduta()
+          if (bottone) bottone.disabled = false
+          msg.innerHTML = AC.avviso('err', '<strong>NON riattivato.</strong> ' + esc(funzioneAssente(e) ? 'il database non è ancora aggiornato (manca l\'SQL ANAG_10). Niente è cambiato.' : spiega(e)))
+        }
+      }
+    })
+    // Data futura: solo un avviso, si può riattivare lo stesso.
+    var campoInizio = el('cx-inizio')
+    function avvisoFuturo() {
+      var box = el('cx-riattiva-futuro'); if (!box) return
+      var d = campoInizio.value
+      box.innerHTML = d && d > AC.oggiIso() ? AC.avviso('warn', '<strong>La data è nel futuro (' + esc(AC.data(d)) + ').</strong> La scheda torna fra gli attivi già da oggi, in tutte le app. Se è giusto, premi «Riattiva».') : ''
     }
+    campoInizio.addEventListener('input', avvisoFuturo)
+    campoInizio.addEventListener('change', avvisoFuturo)
+    avvisoFuturo()
+  }
+  function testoAccessoBloccato() {
+    return '<strong>Il suo accesso alle app resta bloccato.</strong> Riattivare la scheda non lo sblocca. Se deve rientrare nelle app: riquadro «Accesso alle app», tasto «Sblocca accesso» (al posto di «Blocca accesso»).'
   }
   function apriCancella(o) {
     if (noCancella(o)) return                     // il tasto non c'è: seconda difesa
@@ -389,8 +601,8 @@ var PS = (function () {
     CX.cancella({
       tipo: 'persona', id: o.id, nome: nome(o), elenco: '#persone', utente: ST.utente,
       archivia: attiva(o) && !schedaMiaOTitolare(o) ? function () { apriArchivia(o) } : null,
-      cosaArchivia: 'resta fra «chi non lavora più con noi», con tutti i suoi dati',
-      giaArchiviato: attiva(o) ? null : 'È già archiviata: è fra «chi non lavora più con noi».',
+      cosaArchivia: 'va in Archivio, con tutti i suoi dati',
+      giaArchiviato: attiva(o) ? null : 'È già archiviata: è in Archivio.',
       avvisoAccesso: avvisoAccesso,
       notaFatto: o.user_id ? 'Il suo accesso è bloccato: l\'account resta, senza scheda.' : '',
       primaDi: o.user_id ? function () { return bloccaPrimaDiCancellare(o) } : null,
@@ -554,13 +766,14 @@ var PS = (function () {
     if (/anag_operai_ditta_solo_esterni_ck/.test(m)) return 'la ditta si mette solo agli Esterni.'
     if (/anag_documenti_file_per_id_ck/.test(m)) return 'il file non è nella cartella della persona.'
     if (/rapporto|ditta_id/.test(m) && /column|colonna/i.test(m)) return 'il database non è ancora aggiornato (manca l\'SQL ANAG_F2_01).'
+    m = m.replace(/^anag_(riattiva_persona|correggi_periodo|togli_periodo):\s*/, '')
     if (/row-level security|violates row-level|permission denied|0 righe/i.test(m)) return 'il database non ti dà il permesso. Esci, rientra e riprova; se resta così, chiedi al titolare.'
     return m
   }
 
   // ── MODULO PERSONA (nuova / modifica) ─────────────────────────────────────
   function bozzaVuota() {
-    return { id: null, nome: '', cognome: '', rapporto: 'dipendente', ditta_id: null, ruolo: '', telefono: '', email: '',
+    return { id: null, nome: '', cognome: '', data_nascita: '', rapporto: 'dipendente', ditta_id: null, ruolo: '', telefono: '', email: '',
              data_assunzione: '', data_fine_rapporto: '', agenzia: false, nome_agenzia: '', nuovaDitta: false }
   }
   function bozzaDa(o) {
@@ -571,7 +784,7 @@ var PS = (function () {
   }
   function leggiModulo() {
     var f = ST.form; if (!f) return
-    ;['nome', 'cognome', 'ruolo', 'telefono', 'email', 'data_assunzione', 'data_fine_rapporto', 'nome_agenzia'].forEach(function (k) {
+    ;['nome', 'cognome', 'data_nascita', 'ruolo', 'telefono', 'email', 'data_assunzione', 'data_fine_rapporto', 'nome_agenzia'].forEach(function (k) {
       var x = el('ps-' + k); if (x && !x.readOnly) f[k] = x.value
     })
     var r = document.querySelector('input[name="ps-rapporto"]:checked'); if (r) f.rapporto = r.value
@@ -606,6 +819,8 @@ var PS = (function () {
     h += '<div class="blocco"><div class="campi-due campi-pari">' +
       campo('ps-nome', 'Nome', input('ps-nome', f.nome, ' autocomplete="off" maxlength="80"'), '', true) +
       campo('ps-cognome', 'Cognome', input('ps-cognome', f.cognome, ' autocomplete="off" maxlength="80"'), '', true) + '</div>' +
+      // Solo per le persone nuove: serve a capire se esiste già. Dopo si cambia in «Dati personali».
+      (f.id ? '' : campo('ps-data_nascita', 'Data di nascita', input('ps-data_nascita', f.data_nascita, '', 'date'), 'Serve a capire se la persona esiste già. La vedono solo titolare e responsabile.')) +
       campo('ps-ruolo', 'Mansione', input('ps-ruolo', f.ruolo, ' list="ps-mansioni" autocomplete="off" maxlength="80"') +
         '<datalist id="ps-mansioni">' + MANSIONI.map(function (m) { return '<option value="' + esc(m) + '">' }).join('') + '</datalist>',
         'Il lavoro che fa (es. Carpentiere, Lattoniere). Non è il ruolo nelle app.') +
@@ -617,7 +832,7 @@ var PS = (function () {
     // Date
     h += '<div class="blocco"><div class="campi-due campi-pari">' +
       campo('ps-data_assunzione', esterno ? 'Lavora con noi dal' : 'Assunto il', input('ps-data_assunzione', f.data_assunzione, '', 'date')) +
-      campo('ps-data_fine_rapporto', 'Fine rapporto', input('ps-data_fine_rapporto', f.data_fine_rapporto, '', 'date'), 'È l\'ultimo giorno di lavoro. Vuota = tempo indeterminato. Dal giorno dopo non compare più negli elenchi di lavoro e l\'accesso alle app si blocca da solo.') +
+      campo('ps-data_fine_rapporto', 'Fine rapporto', input('ps-data_fine_rapporto', f.data_fine_rapporto, '', 'date'), 'È l\'ultimo giorno di lavoro. Vuota = tempo indeterminato. Dal giorno dopo va in Archivio (sparisce dagli elenchi di lavoro) e l\'accesso alle app si blocca da solo.') +
       '</div></div>'
 
     // Agenzia: solo Dipendenti (interinali). Per un Esterno non si mostra e non si scrive.
@@ -709,6 +924,63 @@ var PS = (function () {
     }
   }
 
+  // ── Esiste già? (v9) ──────────────────────────────────────────────────────
+  // Nome e cognome anche scambiati o con gli spazi diversi: «Gian Luca Rossi» = «Rossi Gianluca».
+  function chiaveNome(n, c) { return AC.normale(n + ' ' + c).split(' ').filter(Boolean).sort().join('') }
+  // Telefono: solo le ultime 9 cifre, così 079 111 11 11 = +41 79 111 11 11 = 0041791111111. Meno di 6 cifre non è un numero.
+  function chiaveTelefono(t) { var d = String(t || '').replace(/\D/g, ''); return d.length < 6 ? '' : d.slice(-9) }
+  // Rilegge dal database (nel frattempo un altro può aver inserito). Le date di nascita servono solo per il confronto.
+  // forti = stessa persona quasi di certo (Esiste già). omonimi = solo il nome uguale (avviso, non si confonde).
+  async function cercaDoppioni(f, email) {
+    await carica(true)
+    var nascite = null
+    try {
+      nascite = {}
+      ;(await AD.leggi('operai_dati_personali', 'operaio_id,data_nascita')).forEach(function (d) { nascite[d.operaio_id] = d.data_nascita })
+    } catch (e) {
+      if (e.sessioneAssente) throw e
+      nascite = null
+    }
+    var kn = chiaveNome(f.nome, f.cognome), kt = chiaveTelefono(f.telefono), esito = { forti: [], omonimi: [] }
+    ST.operai.forEach(function (o) {
+      var motivi = [], stessoNome = chiaveNome(o.nome, o.cognome) === kn, dn = nascite ? nascite[o.id] : null
+      if (stessoNome && f.data_nascita && dn === f.data_nascita) motivi.push('nome, cognome e data di nascita (' + AC.data(dn) + ')')
+      if (email && String(o.email || '').trim().toLowerCase() === email) motivi.push('email (' + o.email + ')')
+      if (kt && chiaveTelefono(o.telefono) === kt) motivi.push('telefono (' + o.telefono + ')')
+      if (motivi.length) { esito.forti.push({ o: o, motivi: motivi }); return }
+      if (!stessoNome) return
+      var perche = !nascite ? 'non riesco a leggere le date di nascita.'
+        : (f.data_nascita && dn) ? 'la data di nascita è diversa (' + AC.data(dn) + ').'
+        : dn ? 'nel modulo manca la data di nascita.'
+        : f.data_nascita ? 'quella scheda non ha la data di nascita.'
+        : 'manca la data di nascita.'
+      esito.omonimi.push({ o: o, perche: perche })
+    })
+    return esito
+  }
+  function statoDoppione(o) {
+    if (attiva(o)) return 'è fra gli attivi.'
+    return testoArchivio(o) + '.'
+  }
+  function htmlDoppioni(t) {
+    var h = t.forti.map(function (x) {
+      var o = x.o, arch = !attiva(o)
+      return AC.avviso('warn', '<div class="doppione"><strong>Esiste già ' + esc(nome(o)) + '</strong>, ' + esc(statoDoppione(o)) +
+        (arch ? ' Riattivare la scheda vecchia?' : '') +
+        '<span class="dato-sotto">Uguale: ' + esc(x.motivi.join(', ')) + '.' + (arch && o.data_fine_rapporto ? ' Ultimo giorno di lavoro: ' + esc(AC.data(o.data_fine_rapporto)) + '.' : '') + '</span>' +
+        '<div class="azioni-riga">' + (arch
+          ? '<button type="button" class="btn btn-primario" data-ps-riattiva="' + esc(o.id) + '">' + ico('persone') + '<span>Riattiva</span></button>'
+          : '<a class="btn btn-primario" data-libera="1" href="#persona/' + esc(o.id) + '">' + ico('apri') + '<span>Apri la scheda</span></a>') + '</div></div>')
+    }).join('')
+    h += t.omonimi.map(function (x) {
+      var o = x.o
+      return AC.avviso('info', '<div class="doppione"><strong>C\'è già una persona con questo nome: ' + esc(nome(o)) + '</strong>, ' + esc(statoDoppione(o)) +
+        '<span class="dato-sotto">Non posso dire che sia la stessa: ' + esc(x.perche) + '</span>' +
+        '<div class="azioni-riga"><a class="btn btn-secondario" data-libera="1" href="#persona/' + esc(o.id) + '">' + ico('apri') + '<span>Apri quella scheda</span></a></div></div>')
+    }).join('')
+    return h + '<div class="azioni-riga"><button type="button" class="btn btn-secondario btn-largo" data-ps-azione="salva-comunque">' + ico('salva') + '<span>È un\'altra persona</span></button></div>'
+  }
+
   async function salvaPersona() {
     leggiModulo()
     var f = ST.form, pane = el('pane-dettaglio')
@@ -723,30 +995,49 @@ var PS = (function () {
     var email = String(f.email || '').trim().toLowerCase()
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return erroreCampo('ps-email', 'Questa email non sembra giusta.')
     if (f.data_assunzione && f.data_fine_rapporto && f.data_fine_rapporto < f.data_assunzione) return erroreCampo('ps-data_fine_rapporto', 'La fine rapporto è prima dell\'inizio.')
-    if (email) {
+    if (orig && email) {
       var doppia = ST.operai.filter(function (o) { return o.id !== f.id && String(o.email || '').trim().toLowerCase() === email })[0]
       if (doppia) return erroreCampo('ps-email', 'Questa email è già di ' + nome(doppia) + '. Ogni persona ha la sua.')
     }
-    // Omonimi: avviso, mai blocco
+    // Persona nuova: esiste già? Avviso, mai blocco (con «È un'altra persona» si salva).
     if (!orig && !ST.salvaComunque) {
-      var omo = ST.operai.filter(function (o) { return AC.normale(nome(o)) === AC.normale(f.nome + ' ' + f.cognome) })[0]
-      if (omo) {
-        el('ps-avvisi').innerHTML = AC.avviso('warn', 'C\'è già <strong>' + esc(nome(omo)) + '</strong>' + (attiva(omo) ? '' : ' (non lavora più con noi)') + '. È la stessa persona?' +
-          '<div class="azioni-riga"><a class="btn btn-primario btn-piccolo" href="#persona/' + esc(omo.id) + '">Sì, apri quella</a>' +
-          '<button type="button" class="btn btn-secondario btn-piccolo" data-ps-azione="salva-comunque">No, è un\'altra: salva</button></div>')
+      var bc = el('ps-salva'); bc.disabled = true
+      var trovati
+      try { trovati = await cercaDoppioni(f, email) } catch (e) {
+        if (e.sessioneAssente) return APP.sessioneScaduta()
+        bc.disabled = false
+        el('ps-avvisi').innerHTML = AC.avviso('warn', '<strong>Non riesco a controllare se esiste già.</strong> ' + esc(spiega(e)) +
+          '<div class="azioni-riga"><button type="button" class="btn btn-secondario" data-ps-azione="salva-comunque">' + ico('salva') + '<span>Salva senza controllo</span></button></div>')
+        el('ps-avvisi').scrollIntoView({ behavior: 'smooth', block: 'center' })
+        return
+      }
+      bc.disabled = false
+      if (trovati.forti.length || trovati.omonimi.length) {
+        el('ps-avvisi').innerHTML = htmlDoppioni(trovati)
         el('ps-avvisi').scrollIntoView({ behavior: 'smooth', block: 'center' })
         return
       }
     }
+    // «È un'altra persona» con la stessa email: si salva senza email. Ogni persona ha la sua, e il collegamento agli account passa da lì.
+    var emailTolta = null
+    if (!orig && email && ST.operai.some(function (o) { return String(o.email || '').trim().toLowerCase() === email })) { emailTolta = email; email = '' }
 
     // Fine rapporto che blocca l'accesso: avviso e conferma (mai un blocco per sbaglio)
     var fineNuova = vuotoNull(f.data_fine_rapporto)
+    // Togliere a mano la fine rapporto di chi è in Archivio cancella l'ultimo giorno. Avviso: se torna a lavorare si usa Riattiva.
+    if (orig && !attiva(orig) && orig.data_fine_rapporto && !fineNuova && !ST.confermaTogliFine) {
+      el('ps-avvisi').innerHTML = AC.avviso('warn', '<strong>Stai togliendo la fine rapporto (' + esc(AC.data(orig.data_fine_rapporto)) + ').</strong> Così quella data si perde. Se è tornato a lavorare usa «Riattiva»: il periodo vecchio resta scritto.' +
+        '<div class="azioni-riga"><button type="button" class="btn btn-primario" data-ps-riattiva="' + esc(orig.id) + '">' + ico('persone') + '<span>Riattiva</span></button>' +
+        '<button type="button" class="btn btn-secondario" data-ps-azione="togli-fine-comunque">' + ico('salva') + '<span>Era un errore: salva così</span></button></div>')
+      el('ps-avvisi').scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
     if (orig && orig.user_id && fineNuova && fineNuova !== (orig.data_fine_rapporto || null) && !ST.confermaFine) {
       var pr = profilo(orig.user_id), mia = !!(ST.utente && orig.user_id === ST.utente.id), oggiS = AC.oggiIso()
       var testoConf = null
       if (pr && pr.ruolo === 'titolare') {
         if (mia) testoConf = '<strong>Stai mettendo la fine rapporto alla TUA scheda.</strong> Sei titolare: il tuo accesso NON si blocca da solo, ma dal ' +
-          esc(AC.data(giornoDopo(fineNuova))) + ' risulterai «non lavora più con noi» in tutte le app. Confermi?'
+          esc(AC.data(giornoDopo(fineNuova))) + ' risulterai in Archivio in tutte le app. Confermi?'
       } else if (mia) {
         testoConf = '<strong>Stai mettendo la fine rapporto alla TUA scheda.</strong> ' + (fineNuova < oggiS
           ? 'La data è passata: il tuo accesso si blocca SUBITO e non entri più in nessuna app, nemmeno qui.'
@@ -780,6 +1071,19 @@ var PS = (function () {
         salvata = await AD.inserisci('operai', riga, col)
         ST.operai.push(salvata)
         ST.messaggio = { tipo: 'ok', html: '<strong>' + esc(nome(salvata)) + '</strong> salvato' + (esterno ? ' come Esterno (' + esc(nomeDitta(salvata)) + ').' : '.') }
+        if (emailTolta) {
+          ST.messaggio.tipo = 'warn'
+          ST.messaggio.html += '<br><strong>Salvato senza email:</strong> ' + esc(emailTolta) + ' è già di un\'altra persona, e ognuno ha la sua. Con «Modifica» scrivine un\'altra.'
+        }
+        if (f.data_nascita) {
+          try {
+            ST.dp[salvata.id] = await AD.upsert('operai_dati_personali', { operaio_id: salvata.id, data_nascita: f.data_nascita }, 'operaio_id', COL_DP)
+          } catch (ex) {
+            if (ex.sessioneAssente) throw ex
+            ST.messaggio.tipo = 'warn'
+            ST.messaggio.html += '<br><strong>La scheda è salvata, la data di nascita NO.</strong> Riscrivila in «Dati personali». ' + esc(spiega(ex))
+          }
+        }
       } else {
         salvata = await AD.aggiorna('operai', orig.id, riga, col)
         ST.operai = ST.operai.map(function (o) { return o.id === salvata.id ? salvata : o })
@@ -788,10 +1092,10 @@ var PS = (function () {
         if (orig.user_id && (salvata.data_fine_rapporto || null) !== (orig.data_fine_rapporto || null)) ST.caricato = false
       }
       if (!salvata.rapporto) salvata.rapporto = 'dipendente'
-      ST.form = null; ST.salvaComunque = false; ST.confermaFine = false
+      ST.form = null; ST.salvaComunque = false; ST.confermaFine = false; ST.confermaTogliFine = false
       APP.libera()
       location.hash = '#persona/' + salvata.id
-    } catch (e) { erroreSalva(e) }
+    } catch (e) { ST.salvaComunque = false; ST.confermaTogliFine = false; erroreSalva(e) }
   }
 
   // ── MODULO DATI PERSONALI ─────────────────────────────────────────────────
@@ -1100,10 +1404,18 @@ var PS = (function () {
 
   // ── Clic (un ascoltatore per sezione) ─────────────────────────────────────
   function clic(ev) {
-    var t = ev.target.closest('[data-apri-persona],[data-ps-azione],[data-ps-ditta],[data-ps-file]')
+    var t = ev.target.closest('[data-apri-persona],[data-ps-azione],[data-ps-ditta],[data-ps-file],[data-ps-riattiva],[data-ps-periodo-correggi],[data-ps-periodo-togli]')
     if (!t) return
     if (t.dataset.apriPersona) { location.hash = '#persona/' + t.dataset.apriPersona; return }
     if (t.dataset.psFile) { apriFile(t.dataset.psFile, t); return }
+    if (t.dataset.psPeriodoCorreggi) { var pc = periodoAperto(t.dataset.psPeriodoCorreggi); if (pc) apriCorreggiPeriodo(pc.o, pc.p); return }
+    if (t.dataset.psPeriodoTogli) { var pt = periodoAperto(t.dataset.psPeriodoTogli); if (pt) apriTogliPeriodo(pt.o, pt.p); return }
+    if (t.dataset.psRiattiva) {
+      var ori = perId(t.dataset.psRiattiva); if (!ori) return
+      if (ST.form) leggiModulo()
+      apriRiattiva(ori, ST.form ? { modulo: true, inizio: ST.form.id ? '' : ST.form.data_assunzione } : null)
+      return
+    }
     if (t.dataset.psDitta) {
       leggiModulo(); ST.form.ditta_id = t.dataset.psDitta; ST.form.nuovaDitta = false
       el('ps-ditta').innerHTML = htmlDitta(); collegaDitta(); return
@@ -1111,7 +1423,6 @@ var PS = (function () {
     var a = t.dataset.psAzione
     if (a === 'nuova') { location.hash = '#nuova-persona'; return }
     if (a === 'archivia') { var oa = perId(aperto); if (oa) apriArchivia(oa); return }
-    if (a === 'rimetti') { var or = perId(aperto); if (or) rimetti(or); return }
     if (a === 'cancella') { var oc = perId(aperto); if (oc) apriCancella(oc); return }
     if (a === 'ex') { ST.mostraEx = !ST.mostraEx; disegnaElenco(aperto); return }
     if (a === 'ditta-cambia') { leggiModulo(); ST.form.ditta_id = null; el('ps-ditta').innerHTML = htmlDitta(); collegaDitta(); el('ps-ditta-cerca').focus(); return }
@@ -1121,6 +1432,7 @@ var PS = (function () {
     if (a === 'ditta-comunque') { ST.form.dittaComunque = true; salvaNuovaDitta(); return }
     if (a === 'salva-comunque') { ST.salvaComunque = true; salvaPersona(); return }
     if (a === 'fine-conferma') { ST.confermaFine = true; salvaPersona(); return }
+    if (a === 'togli-fine-comunque') { ST.confermaTogliFine = true; salvaPersona(); return }
     if (a === 'fine-annulla') { el('ps-avvisi').innerHTML = ''; var dfr = el('ps-data_fine_rapporto'); if (dfr) dfr.focus(); return }
     if (a === 'ce-togli') { togliEmergenza(false); return }
     if (a === 'ce-togli-si') { APP.chiudiLivello().then(function () { togliEmergenza(true) }); return }
@@ -1148,7 +1460,7 @@ var PS = (function () {
     if (vista === 'persona') {
       var o = perId(id)
       if (!o) { el('pane-dettaglio').innerHTML = AC.avviso('warn', 'Questa persona non c\'è (o non è leggibile). <a href="#persone">Torna all\'elenco</a>.'); return }
-      if (sotto === 'modifica') { if (!ST.form || ST.form.id !== id) ST.form = bozzaDa(o); ST.salvaComunque = false; ST.confermaFine = false; return disegnaModulo() }
+      if (sotto === 'modifica') { if (!ST.form || ST.form.id !== id) ST.form = bozzaDa(o); ST.salvaComunque = false; ST.confermaFine = false; ST.confermaTogliFine = false; return disegnaModulo() }
       ST.form = null
       if (sotto === 'dati' || sotto === 'emergenza') {
         if (!(o.id in ST.dp) || !(o.id in ST.ce)) {
@@ -1172,7 +1484,7 @@ var PS = (function () {
     el('pane-dettaglio').addEventListener('click', clic)
   }
 
-  return { mostra: mostra, avvia: avvia, svuota: svuota, scarta: scarta, ricarica: function () { ST.caricato = false },
+  return { mostra: mostra, avvia: avvia, svuota: svuota, scarta: scarta, ricarica: function () { ST.caricato = false }, mostraRegistroPeriodi: mostraRegistroPeriodi,
            // per le prove
-           _st: ST, _attiva: attiva, _giornoDopo: giornoDopo }
+           _st: ST, _attiva: attiva, _giornoDopo: giornoDopo, _chiaveNome: chiaveNome, _chiaveTelefono: chiaveTelefono }
 })()

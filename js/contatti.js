@@ -7,7 +7,7 @@
    - Archiviati (attivo = false): non negli elenchi; compaiono nella ricerca e nel
      filtro «Archiviati», con la scritta e «Rimetti fra gli attivi».
    - «Archivia» = attivo false, i dati restano. «Cancella» (v7): solo il titolare, con password, avviso e registro
-     (js/cancella.js); se il contatto è collegato (commessa, Esterno, Contabilità, Acquisti, Preventivi) il database
+     (js/cancella.js); se il contatto è collegato (commessa, Esterno, Contabilità, Materiali, Preventivi) il database
      rifiuta: si spiega cosa blocca e si propone «Archivia invece».
    - Omonimi: avviso, mai blocco. CAP ↔ località: aiuto, mai blocco.
    - Categorie multiple (rubrica_categorie) come nella Rubrica: si assegnano e si tolgono nel modulo,
@@ -41,7 +41,7 @@ var KT = (function () {
     var r = await Promise.all([
       AD.leggi('tm_contatti', COL),
       AD.leggi('cantieri', 'id,nome,numero_commessa,cliente_id,tipo'),
-      AD.leggiConRiserva('operai', 'id,nome,cognome,ditta_id,rapporto', 'id,nome,cognome')
+      AD.leggiConRiserva('operai', 'id,nome,cognome,ditta_id,rapporto,attivo,data_fine_rapporto', 'id,nome,cognome')
     ])
     if (!r[0].length) throw new Error('Il database non mi dà i contatti (0 righe). L\'elenco NON è attendibile: esci, rientra e riprova.')
     ST.contatti = r[0]; ST.cantieri = r[1]; ST.operai = r[2].righe
@@ -55,7 +55,9 @@ var KT = (function () {
     ST.azienda = ((ST.categorie || []).filter(function (c) { return c.azienda_id })[0] || ST.contatti.filter(function (k) { return k.azienda_id })[0] || {}).azienda_id || null
     // Gruppi per il «Gruppo predefinito» (Pre-contabilità): stessa fonte della Pre-contabilità, tm_conta_gruppi.
     // Se non si leggono, il campo non si offre e il gruppo di ogni contatto resta com'è (mai un gruppo cancellato per sbaglio).
-    try {
+    // Solo il titolare lo vede e lo cambia (tm_conta_* solo titolare, Umberto 4.11.2026). Per gli altri non si legge nemmeno:
+    // darebbe zero righe. ST.gruppi resta null, quindi il campo non si scrive mai (vedi salvataggio).
+    if (!vedeGruppi()) { ST.gruppi = null; ST.gruppiErrore = null } else try {
       var g = await AD.leggiConRiserva('tm_conta_gruppi', 'codice,nome,ordine,attivo,tipo,azienda_id', 'codice,nome,ordine,attivo')
       ST.gruppi = g.righe.sort(function (a, b) { return (a.ordine || 0) - (b.ordine || 0) })
       ST.gruppiErrore = ST.gruppi.length ? null : 'Il database non mi dà nessun gruppo (0 righe).'
@@ -70,6 +72,7 @@ var KT = (function () {
   function eCliente(k) { return k.e_cliente === true || k.categoria === 'cliente' || (Array.isArray(k.categorie) && k.categorie.some(function (c) { return CAT_CLIENTE.indexOf(c) >= 0 })) }
   function nomeCat(id) { var c = (ST.categorie || []).filter(function (x) { return x.id === id })[0]; return c ? c.nome : id }
   // «MAT · Materiali»; un codice che non si legge (gruppo di un'altra azienda o elenco non leggibile) si mostra com'è.
+  function vedeGruppi() { return !!ST.utente && ST.utente.ruolo === 'titolare' }
   function etichettaGruppo(cod) {
     var g = (ST.gruppi || []).filter(function (x) { return x.codice === cod })[0]
     return g ? g.codice + ' · ' + g.nome + (g.attivo === false ? ' (disattivato)' : '') : cod
@@ -282,12 +285,12 @@ var KT = (function () {
       dato('Note', k.note ? esc(k.note).replace(/\n/g, '<br>') : '') + '</div>'
     h += '<div class="blocco blocco-tenue">' + dato('UID / partita IVA', esc(k.uid_partita_iva || '')) + dato('IBAN', esc(k.iban || '')) +
       dato('Giorni di pagamento', k.giorni_pagamento != null ? esc(k.giorni_pagamento) : '') +
-      dato('Gruppo predefinito (Pre-contabilità)', k.gruppo_default ? esc(etichettaGruppo(k.gruppo_default)) : '') + '</div>'
+      (vedeGruppi() ? dato('Gruppo predefinito (Pre-contabilità)', k.gruppo_default ? esc(etichettaGruppo(k.gruppo_default)) : '') : '') + '</div>'
     var col = collegamenti(k)
     if (col.commesse.length || col.esterni.length) {
       h += '<div class="blocco"><h3 class="blocco-titolo">' + ico('info') + 'Collegato a</h3>' +
         col.commesse.map(function (c) { return dato('Cliente della commessa', '<a href="#commessa/' + esc(c.id) + '">' + esc((c.numero_commessa ? c.numero_commessa + ' · ' : '') + c.nome) + '</a>') }).join('') +
-        col.esterni.map(function (o) { return dato('Ditta dell\'Esterno', '<a href="#persona/' + esc(o.id) + '">' + esc([o.nome, o.cognome].join(' ')) + '</a>') }).join('') + '</div>'
+        col.esterni.map(function (o) { return dato('Ditta dell\'Esterno', '<a href="#persona/' + esc(o.id) + '">' + esc([o.nome, o.cognome].join(' ')) + '</a>' + (AC.inArchivio(o) ? ' <span class="badge st-senza">In archivio</span>' : '')) }).join('') + '</div>'
     }
     h += '<div class="blocco blocco-tenue" id="kt-fine">' +
       (k.attivo !== false ? '<button type="button" class="btn btn-primario" data-kt-azione="archivia">' + ico('lucchetto') + '<span>Archivia</span></button>' : '') +
@@ -458,7 +461,7 @@ var KT = (function () {
       campo('kt-uid_partita_iva', 'UID / partita IVA', inp('kt-uid_partita_iva', f.uid_partita_iva, ' maxlength="40"')) +
       campo('kt-iban', 'IBAN', inp('kt-iban', f.iban, ' maxlength="42"')) +
       campo('kt-giorni_pagamento', 'Giorni di pagamento', inp('kt-giorni_pagamento', f.giorni_pagamento, ' inputmode="numeric" maxlength="4"')) +
-      (ST.gruppi
+      (!vedeGruppi() ? '' : ST.gruppi
         ? campo('kt-gruppo', 'Gruppo predefinito (Pre-contabilità)', '<select id="kt-gruppo">' + opzioniGruppo(f.gruppo) + '</select>', 'La Pre-contabilità lo propone quando registra una fattura di questo contatto. Vuoto = nessun gruppo.')
         : campo('kt-gruppo', 'Gruppo predefinito (Pre-contabilità)', '<div class="dato-valore">' + (f.gruppo ? esc(f.gruppo) : '<span class="vuoto-inline">—</span>') + '</div>', 'Elenco dei gruppi non leggibile: qui il gruppo non si cambia e resta com\'è. ' + esc(ST.gruppiErrore || ''))) + '</div>'
     h += '<div class="blocco">' + campo('kt-note', 'Note', '<textarea id="kt-note" rows="3" maxlength="2000">' + esc(f.note) + '</textarea>') + '</div>'

@@ -26,7 +26,7 @@ var APP = (function () {
   function mostraLogin(messaggio, tipo) {
     utente = null
     CM.svuota(); PS.svuota(); if (window.KT) KT.svuota()
-    if (window.CX) CX.chiudiSubito()
+    if (window.CX) { CX.chiudiSubito(); CX.avvisoFilePendenti(null) }
     var mr = el('menu-registro'); if (mr) mr.hidden = true
     el('pane-elenco').innerHTML = ''; el('pane-dettaglio').innerHTML = ''
     mostraPagina('login')
@@ -78,6 +78,7 @@ var APP = (function () {
     el('utente').innerHTML = esc(utente.email) + ' <span class="ruolo">' + esc(utente.ruolo) + '</span>'
     mostraPagina('app')
     vai()
+    CX.avvisoFilePendenti(utente)   // cancellazioni con file ancora da togliere: solo il titolare
   }
 
   async function esci() {
@@ -125,7 +126,7 @@ var APP = (function () {
     try {
       try {
         if (sez.menu === 'commesse') return await CM.mostra(parti, utente)
-        if (sez.menu === 'registro') return await CX.mostraRegistro(utente)
+        if (sez.menu === 'registro') { await CX.mostraRegistro(utente); return await PS.mostraRegistroPeriodi(utente) }
         if (sez.menu === 'persone') return await PS.mostra(parti, utente)
         if (sez.menu === 'contatti') {
           if (window.KT) return await KT.mostra(parti, utente)
