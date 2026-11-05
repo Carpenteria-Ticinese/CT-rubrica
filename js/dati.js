@@ -94,7 +94,13 @@ var AD = (function () {
     if (filtro) q = filtro(q)
     var r = await q
     if (r.error) throw errore('Conteggio ' + tabella, r.error)
-    if (typeof r.count !== 'number') throw new Error('Conteggio ' + tabella + ': il database non ha risposto con un numero.')
+    if (typeof r.count !== 'number') {
+      // Il conteggio non ha corpo: una tabella che non c'è risponde 404 vuoto e Supabase non dà né errore né numero.
+      // Si richiede con una lettura vuota, che il motivo lo dice (PGRST205 = tabella assente: chi conta la salta).
+      var r2 = await sb.from(tabella).select(colonna || 'id').limit(0)
+      if (r2.error) throw errore('Conteggio ' + tabella, r2.error)
+      throw new Error('Conteggio ' + tabella + ': il database non ha risposto con un numero.')
+    }
     return r.count
   }
 
