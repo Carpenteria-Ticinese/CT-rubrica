@@ -74,6 +74,7 @@ var CX = (function () {
     tm_conta_offerte: ['offerta in Contabilità', 'offerte in Contabilità'],
     tm_conta_classificazioni: ['classificazione in Contabilità', 'classificazioni in Contabilità'],
     tm_conta_cantiere_contratto: ['contratto in Contabilità', 'contratti in Contabilità'],
+    tm_conta_rubrica_assegnazioni: ['periodo nello storico del conto incassi', 'periodi nello storico del conto incassi'],
     tm_sicurezza_dpi: ['dotazione di sicurezza', 'dotazioni di sicurezza'],
     pl_assegnazioni: ['assegnazione nel Calendario', 'assegnazioni nel Calendario'],
     pl_assegnazioni_previste: ['assegnazione prevista nel Calendario', 'assegnazioni previste nel Calendario'],
@@ -127,7 +128,8 @@ var CX = (function () {
         { t: 'tiri_gru', c: 'cantiere_id' },
         { t: 'tm_conta_classificazioni', c: 'cantiere_id' }, { t: 'tm_conta_movimenti_propri', c: 'cantiere_id' },
         { t: 'tm_conta_fatture_acquisto', c: 'cantiere_id' }, { t: 'tm_conta_fatture', c: 'cantiere_id' },
-        { t: 'tm_conta_offerte', c: 'cantiere_id' }, { t: 'tm_conta_cantiere_contratto', c: 'cantiere_id' }
+        { t: 'tm_conta_offerte', c: 'cantiere_id' }, { t: 'tm_conta_cantiere_contratto', c: 'cantiere_id' },
+        { t: 'tm_conta_rubrica_assegnazioni', c: 'cantiere_id' }   // CONT_104: RESTRICT. Senza CONT_104 la tabella manca e si salta.
       ]
     },
     contatto: {

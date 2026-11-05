@@ -17,6 +17,10 @@
      avviso e registro (js/cancella.js). I due interni di sistema (codice_interno) non si cancellano mai.
    - Il cliente si sceglie dalla Rubrica (tm_contatti); «committente» resta come
      copia del nome, perché App Cantieri e Pre-contabilità leggono quella.
+   - Conto incassi (v11, funzioni dell'SQL CONT_104 della Contabilità): riquadro solo per il titolare. Il dato è lo storico
+     in tm_conta_rubrica_assegnazioni, nessuna colonna su cantieri. Senza CONT_104: nessun riquadro, nessun errore.
+   - Stampa scheda (v11): un documento per il cliente o il cantiere, niente costi, margini, note interne. Per ora l'IBAN lo
+     stampa solo il titolare: per il responsabile non si chiama nemmeno la funzione, sul foglio c'è «lo stampa il titolare».
    ═══════════════════════════════════════════════════════════════════════════ */
 var CM = (function () {
   'use strict'
@@ -63,7 +67,7 @@ var CM = (function () {
     ST.caricato = true
   }
   function scarta() { ST.form = null; ST.salvaComunque = false }
-  function svuota() { ST.cantieri = []; ST.contatti = []; ST.caricato = false; ST.foto = {}; ST.form = null; ST.messaggio = null }
+  function svuota() { ST.cantieri = []; ST.contatti = []; ST.caricato = false; ST.foto = {}; ST.form = null; ST.messaggio = null; CONTO.dati = null; CONTO.form = false; CONTO.giro++; puliziaStampa() }
 
   function perId(id) { return ST.cantieri.filter(function (c) { return c.id === id })[0] || null }
   function contatto(id) { return ST.contatti.filter(function (k) { return k.id === id })[0] || null }
@@ -174,8 +178,10 @@ var CM = (function () {
     var c = perId(id)
     if (!c) { pane.innerHTML = AC.avviso('warn', 'Questa commessa non c\'è (o non è leggibile). <a href="#commesse">Torna all\'elenco</a>.'); return }
     var h = testataDettaglio(eInterno(c) ? nomeMostrato(c) : (c.numero_commessa || '—') + ' · ' + c.nome, badgeStato(c),
-            eInterno(c) ? '' : '<button type="button" class="btn btn-primario" data-azione="modifica" data-id="' + esc(c.id) + '">' + ico('modifica') + '<span>Modifica</span></button>')
+            eInterno(c) ? '' : '<button type="button" class="btn btn-primario" data-azione="modifica" data-id="' + esc(c.id) + '">' + ico('modifica') + '<span>Modifica</span></button>' +
+              '<button type="button" class="btn btn-secondario" id="cm-stampa" data-azione="stampa">🖨️ <span>Stampa scheda commessa</span></button>')
     if (ST.messaggio) { h += AC.avviso(ST.messaggio.tipo, ST.messaggio.html); ST.messaggio = null }
+    h += '<div id="cm-stampa-msg"></div>'
 
     // Due padroni: «In corso» qui, ma l'App Cantieri non l'ha ancora messa al lavoro
     if (c.stato_commessa === 'In corso' && c.stato === 'Completato') {
@@ -222,10 +228,265 @@ var CM = (function () {
       campoLettura('Stato nell\'App Cantieri', esc(c.stato || '—') + '<span class="dato-sotto">lo cambia solo l\'App Cantieri</span>') +
       campoLettura('Creata il', esc(AC.data(c.created_at))) +
       '</div>'
+    // Il posto del riquadro: resta vuoto finché il database non risponde, e vuoto per sempre per chi non è titolare o senza CONT_104.
+    if (eTitolare()) h += '<div id="cm-conto"></div>'
     h += '<div id="cm-foto-info"></div>'
     h += htmlFine(c)
     pane.innerHTML = h
     controllaFoto(c, function () { var x = el('cm-foto-info'); if (x) x.innerHTML = infoFoto(c) })
+    CONTO.dati = null; CONTO.form = false
+    if (eTitolare()) caricaConto(c.id)
+  }
+
+  // ── Conto incassi (v11): solo il titolare ─────────────────────────────────
+  // Le funzioni sono della Contabilità (CONT_104). Qui si leggono e si chiamano, senza scrivere altro.
+  var CONTO = { id: null, giro: 0, dati: null, form: false, messaggio: null, occupato: false }
+  var PAROLE_TIPO = { principale: 'principale', uscite: 'uscite', cantiere: 'di cantiere' }
+
+  function eTitolare() { return !!ST.utente && ST.utente.ruolo === 'titolare' }
+  // CONT_104 non c'è sul database: funzione (PGRST202, 42883) o tabella (PGRST205, 42P01) assente.
+  function rubricaAssente(e) { return /^(PGRST202|PGRST205|42883|42P01)$/.test(String(e && e.codice || '')) }
+  function testoErrore(e) { return (e && e.originale && e.originale.message) || (e && e.message) || String(e) }
+  function ibanLeggibile(i) { return String(i || '').replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim() }
+  function nomeCommessa(c) { return (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c) }
+
+  async function caricaConto(id) {
+    if (!eTitolare()) return
+    var g = ++CONTO.giro, dati
+    try {
+      var at = await AD.rpc('tm_conta_conto_commessa', { p_cantiere: id })
+      var r = await Promise.all([
+        AD.leggi('tm_conta_rubrica_conti', 'id,nome,banca,valuta,tipo', function (q) { return q.eq('attivo', true).order('nome') }),
+        AD.leggi('tm_conta_rubrica_assegnazioni', 'id,conto_id,dal,al,note,created_at,conto:tm_conta_rubrica_conti(nome,attivo)',
+          function (q) { return q.eq('cantiere_id', id).order('dal', { ascending: false }).order('created_at', { ascending: false }) }),
+        AD.leggi('tm_conta_rubrica_assegnazioni', 'conto_id,cantiere_id', function (q) { return q.is('al', null) })
+      ])
+      dati = { attuale: (at && at[0]) || null, conti: r[0], storico: r[1], aperte: r[2] }
+    } catch (e) {
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      if (g !== CONTO.giro) return
+      var box = el('cm-conto')
+      if (!box) return
+      // Senza CONT_104, o se il database dice che non è titolare: niente riquadro e niente errore.
+      if (rubricaAssente(e) || e.codice === '42501') { box.innerHTML = ''; return }
+      box.innerHTML = '<div class="blocco" id="cm-conto-blocco">' + titoloConto() +
+        AC.avviso('err', '<strong>Non riesco a leggere il conto incassi.</strong> ' + esc(testoErrore(e)) +
+          '<div class="azioni-riga"><button type="button" class="btn btn-secondario btn-piccolo" data-azione="conto-riprova">Riprova</button></div>') + '</div>'
+      return
+    }
+    if (g !== CONTO.giro) return
+    CONTO.id = id; CONTO.dati = dati
+    disegnaConto()
+  }
+  function titoloConto() { return '<h3 class="blocco-titolo"><span aria-hidden="true">🏦</span><span>Conto incassi</span></h3>' }
+
+  function contoPrincipale() { return CONTO.dati.conti.filter(function (k) { return k.tipo === 'principale' })[0] || null }
+  // Su quale altra commessa è adesso questo conto (solo i conti di cantiere si spostano da soli).
+  function altraCommessa(idConto) {
+    var a = CONTO.dati.aperte.filter(function (x) { return x.conto_id === idConto && x.cantiere_id !== CONTO.id })[0]
+    return a ? (perId(a.cantiere_id) || { id: a.cantiere_id, nome: 'un\'altra commessa' }) : null
+  }
+  function voceConto(k) {
+    var altra = k.tipo === 'cantiere' ? altraCommessa(k.id) : null
+    var testo = [k.nome, k.banca, k.valuta].filter(Boolean).join(' · ') + ' (' + (PAROLE_TIPO[k.tipo] || k.tipo) + ')' + (altra ? ' — ora su ' + nomeCommessa(altra) : '')
+    return '<option value="' + esc(k.id) + '">' + esc(testo) + '</option>'
+  }
+
+  function disegnaConto() {
+    var box = el('cm-conto'), d = CONTO.dati
+    if (!box || !d) return
+    var a = d.attuale, h = '<div class="blocco" id="cm-conto-blocco">' + titoloConto()
+    if (CONTO.messaggio) { h += AC.avviso(CONTO.messaggio.tipo, CONTO.messaggio.html); CONTO.messaggio = null }
+    if (a) {
+      h += campoLettura('Conto', esc(a.nome) + '<span class="dato-sotto" id="cm-conto-regola">' +
+          (a.di_base ? 'di base: il principale' : 'scelto per questa commessa, dal ' + esc(AC.data(a.dal))) + '</span>') +
+        (a.banca ? campoLettura('Banca', esc(a.banca)) : '') +
+        campoLettura('IBAN', '<span class="cm-iban" id="cm-conto-iban">' + esc(ibanLeggibile(a.iban)) + '</span>') +
+        campoLettura('Valuta', esc(a.valuta))
+    } else {
+      // Zero righe: non c'è un principale, o il database non dà la rubrica. Mai un riquadro vuoto che sembra a posto.
+      h += AC.avviso('warn', '<strong>Nessun conto.</strong> Nella Rubrica dei conti (Contabilità) non c\'è un conto principale attivo: la stampa uscirà senza IBAN.')
+    }
+    h += CONTO.form ? htmlFormConto() :
+      '<div class="azioni-riga"><button type="button" class="btn btn-secondario" id="cm-conto-cambia" data-azione="conto-cambia">' + ico('modifica') + '<span>Cambia conto</span></button></div>'
+    h += '<h4 class="cm-storico-titolo">Storico</h4>' + htmlStorico() + '</div>'
+    box.innerHTML = h
+    if (CONTO.form) {
+      el('cm-conto-scelta').addEventListener('change', aggiornaAvvisoConto)
+      el('cm-conto-dal').addEventListener('change', aggiornaAvvisoConto)
+      aggiornaAvvisoConto()
+    }
+    // Il riquadro aperto o chiuso è il nuovo punto di partenza per «modifiche non salvate».
+    APP.rifirma()
+  }
+
+  function htmlStorico() {
+    var righe = CONTO.dati.storico
+    if (!righe.length) return '<p class="nota" id="cm-storico-vuoto">Nessun cambio finora: la commessa usa il conto principale.</p>'
+    return '<ul class="cm-storico" id="cm-storico">' + righe.map(function (r) {
+      var conto = r.conto || {}
+      var periodo = 'dal ' + AC.data(r.dal) + (r.al ? ' al ' + AC.data(r.al) : ' · in corso' + (conto.attivo === false ? ' · conto spento: ora vale il principale' : ''))
+      return '<li><strong>' + esc(conto.nome || 'Conto') + '</strong><span class="dato-sotto">' + esc(periodo) + '</span>' +
+        (r.note ? '<span class="dato-sotto">' + esc(r.note) + '</span>' : '') + '</li>'
+    }).join('') + '</ul><p class="nota">Fuori da questi periodi vale il conto principale.</p>'
+  }
+
+  function htmlFormConto() {
+    var d = CONTO.dati, a = d.attuale, p = contoPrincipale()
+    var altri = d.conti.filter(function (k) { return k.tipo !== 'principale' || (a && !a.di_base && a.conto_id === k.id) })
+    var scelto = a && !a.di_base ? a.conto_id : ''
+    var opz = '<option value="">Di base: il principale' + (p ? ' (' + esc(p.nome) + ')' : '') + '</option>' +
+      altri.map(voceConto).join('').replace('value="' + esc(scelto) + '"', 'value="' + esc(scelto) + '" selected')
+    return '<div class="cm-conto-form" id="cm-conto-form">' +
+      campo('conto-scelta', 'Conto', '<select id="cm-conto-scelta">' + opz + '</select>') +
+      campo('conto-dal', 'Dal giorno', '<input id="cm-conto-dal" type="date" value="' + esc(AC.oggiIso()) + '">') +
+      '<div id="campo-conto-note-box">' + campo('conto-note', 'Nota (facoltativa)', input('conto-note', '', ' autocomplete="off" maxlength="200"')) + '</div>' +
+      '<div id="cm-conto-avviso"></div>' +
+      '<div class="azioni-riga">' +
+        '<button type="button" class="btn btn-primario" id="cm-conto-salva" data-azione="conto-salva">' + ico('salva') + '<span>Salva il cambio</span></button>' +
+        '<button type="button" class="btn btn-secondario" data-azione="conto-annulla">' + ico('chiudi') + '<span>Annulla</span></button>' +
+      '</div></div>'
+  }
+
+  // Avvisi, non blocchi. Il database sposta un conto di cantiere dall'altra commessa senza chiedere: va detto prima.
+  function aggiornaAvvisoConto() {
+    var s = el('cm-conto-scelta'), box = el('cm-conto-avviso'), scelta = s.value, h = ''
+    el('campo-conto-note-box').hidden = !scelta   // tornando al principale non si apre un periodo: la nota non andrebbe da nessuna parte
+    var k = CONTO.dati.conti.filter(function (x) { return x.id === scelta })[0]
+    var altra = k && k.tipo === 'cantiere' ? altraCommessa(k.id) : null
+    if (altra) h += AC.avviso('warn', 'Questo conto ora è su <strong>' + esc(nomeCommessa(altra)) + '</strong>. Se salvi passa qui, e quella commessa torna al conto principale.')
+    var dal = el('cm-conto-dal').value
+    if (dal && dal > AC.oggiIso()) h += AC.avviso('warn', 'La data è nel futuro, ma il conto cambia già adesso: da subito le stampe useranno il conto nuovo.')
+    box.innerHTML = h
+  }
+
+  async function salvaConto() {
+    if (CONTO.occupato) return
+    var id = CONTO.id, d = CONTO.dati, a = d.attuale, scelta = el('cm-conto-scelta').value || null, dal = el('cm-conto-dal').value
+    var nota = scelta ? String(el('cm-conto-note').value || '').trim() : ''
+    var box = el('cm-conto-avviso')
+    if (!dal) { box.innerHTML = AC.avviso('err', 'Scrivi la data da cui vale il cambio.'); return }
+    var periodoAperto = d.storico.some(function (r) { return !r.al })
+    if ((scelta && a && !a.di_base && a.conto_id === scelta) || (!scelta && a && a.di_base && !periodoAperto)) {
+      box.innerHTML = AC.avviso('info', 'È già questo conto: niente da cambiare.')
+      return
+    }
+    CONTO.occupato = true
+    var b = el('cm-conto-salva'); b.disabled = true
+    try {
+      await AD.rpc('tm_conta_assegna_conto', { p_cantiere: id, p_conto: scelta, p_dal: dal, p_note: nota || null })
+    } catch (e) {
+      CONTO.occupato = false
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      b.disabled = false
+      box.innerHTML = AC.avviso('err', '<strong>NON salvato.</strong> ' + esc(testoErrore(e)))
+      return
+    }
+    CONTO.occupato = false
+    CONTO.form = false
+    CONTO.messaggio = { tipo: 'ok', html: scelta ? 'Conto cambiato, dal ' + esc(AC.data(dal)) + '.' : 'La commessa è tornata al conto principale, dal ' + esc(AC.data(dal)) + '.' }
+    await caricaConto(id)
+    // Si rilegge e si controlla: una scrittura che non si ritrova non è una scrittura.
+    var a2 = CONTO.dati && CONTO.dati.attuale
+    if (CONTO.dati && (scelta ? (!a2 || a2.di_base || a2.conto_id !== scelta) : (a2 && !a2.di_base))) {
+      CONTO.messaggio = { tipo: 'err', html: '<strong>Il cambio non risulta.</strong> Il database non mostra il conto scelto: controlla e riprova.' }
+      disegnaConto()
+    }
+  }
+
+  // ── Stampa scheda commessa (v11) ──────────────────────────────────────────
+  // Una pagina, uguale per chi stampa tranne l'IBAN. Si rileggono i dati al momento: l'IBAN è quello di adesso, non di quando la scheda è stata aperta.
+  // Dentro solo #stampa-commessa, fuori dal resto della pagina (css: @media print). Dopo la stampa il foglio si svuota: l'IBAN non resta nella pagina (primo tocco, o cambio di schermata).
+  var titoloPrima = null
+  function puliziaStampa() {
+    var s = el('stampa-commessa'); if (s) s.innerHTML = ''
+    document.body.classList.remove('stampa-attiva')
+    if (titoloPrima !== null) { document.title = titoloPrima; titoloPrima = null }
+  }
+  var TESTO_IBAN = {
+    resp: 'IBAN: lo stampa il titolare',
+    assente: 'IBAN: non stampato, la Rubrica dei conti non è ancora attiva',
+    manca: 'IBAN: manca il conto principale nella Rubrica dei conti',
+    nonLetto: 'IBAN: non stampato, non è stato possibile leggerlo'
+  }
+  // Solo il titolare chiama la funzione. Il responsabile non la chiama mai: la risposta non deve nemmeno arrivare al suo telefono.
+  async function ibanPerStampa(c) {
+    if (!eTitolare()) return { testo: TESTO_IBAN.resp }
+    try {
+      var r = await AD.rpc('tm_conta_iban_per_stampa', { p_tipo: 'commessa', p_id: c.id })
+      var riga = r && r[0]
+      return riga && riga.iban ? { iban: riga.iban } : { testo: TESTO_IBAN.manca, avviso: true }
+    } catch (e) {
+      if (e.sessioneAssente) throw e
+      if (rubricaAssente(e)) return { testo: TESTO_IBAN.assente }
+      if (e.codice === 'P0002') return { testo: TESTO_IBAN.manca, avviso: true }
+      throw e
+    }
+  }
+  function rigaFoglio(etichetta, valore) {
+    return valore ? '<div class="sf-riga"><div class="sf-etichetta">' + esc(etichetta) + '</div><div class="sf-valore">' + esc(valore) + '</div></div>' : ''
+  }
+  function htmlFoglio(c, k, figure, ib) {
+    var paese = c.paese && c.paese !== 'CH' ? AC.nomePaese(c.paese) || c.paese : ''
+    var citta = [c.cap, c.citta].filter(Boolean).join(' ')
+    var cittaK = k ? [k.cap, k.citta].filter(Boolean).join(' ') : ''
+    var h = '<div class="sf-testa"><div class="sf-ditta">Carpenteria Ticinese Sagl</div><h1>Scheda commessa</h1></div>'
+    h += '<div class="sf-gruppo">' +
+      rigaFoglio('Numero commessa', c.numero_commessa) + rigaFoglio('Nome', nomeMostrato(c)) + rigaFoglio('Codice', c.codice_interno) +
+      rigaFoglio('Tipo', eInterno(c) ? 'Interno' : 'Commessa') + rigaFoglio('Stato', c.stato_commessa || 'non ancora scelto') + '</div>'
+    h += '<h2>Cliente</h2><div class="sf-gruppo">' +
+      rigaFoglio('Nome', k ? AC.nomeContatto(k) : c.committente || 'non indicato') +
+      (k ? rigaFoglio('Referente', k.referente) + rigaFoglio('Indirizzo', [k.indirizzo, cittaK].filter(Boolean).join(', ')) +
+           rigaFoglio('Telefono', [k.telefono, k.cellulare].filter(Boolean).join(' · ')) + rigaFoglio('Email', k.email)
+         : rigaFoglio('Telefono', c.telefono_committente) + rigaFoglio('Email', c.email_committente)) + '</div>'
+    h += '<h2>Cantiere</h2><div class="sf-gruppo">' +
+      (rigaFoglio('Località', c.luogo) + rigaFoglio('Indirizzo', [c.via, citta, paese].filter(Boolean).join(', ')) || rigaFoglio('Indirizzo', 'non indicato')) + '</div>'
+    if (figure === null) h += '<h2>Referenti</h2><div class="sf-gruppo"><p class="sf-nota">Elenco dei referenti non letto.</p></div>'
+    else if (figure.length) {
+      h += '<h2>Referenti</h2><div class="sf-gruppo">' + figure.map(function (f) {
+        return rigaFoglio(f.ruolo || 'Referente', [[f.nome, f.cognome].filter(Boolean).join(' '), f.nome_impresa || f.azienda, f.nome_referente ? 'rif. ' + f.nome_referente : '', f.telefono, f.email].filter(Boolean).join(' · '))
+      }).join('') + '</div>'
+    }
+    h += '<h2>Date</h2><div class="sf-gruppo">' + rigaFoglio('Creata il', AC.data(c.created_at)) + rigaFoglio('Stampata il', AC.data(AC.oggiIso())) + '</div>'
+    h += ib.iban
+      ? '<h2>Pagamenti</h2><div class="sf-gruppo"><div class="sf-riga"><div class="sf-etichetta">IBAN</div><div class="sf-valore sf-iban" id="sf-iban">' + esc(ibanLeggibile(ib.iban)) + '</div></div></div>'
+      : '<h2>Pagamenti</h2><div class="sf-gruppo"><p class="sf-nota" id="sf-iban-testo">' + esc(ib.testo) + '</p></div>'
+    return h
+  }
+  async function stampa(c, senzaIban) {
+    var b = el('cm-stampa'), msg = el('cm-stampa-msg')
+    if (!b || b.disabled) return
+    b.disabled = true
+    if (msg) msg.innerHTML = ''
+    puliziaStampa()
+    try {
+      var righe = (await AD.leggiConRiserva('cantieri', ST.colCantieri + ',email_committente,telefono_committente', ST.colCantieri, function (q) { return q.eq('id', c.id) })).righe
+      if (righe.length !== 1) throw new Error('Il database non mi dà questa commessa (' + righe.length + ' righe).')
+      var fresca = righe[0], k = null, figure
+      if (fresca.cliente_id) {
+        k = (await AD.leggi('tm_contatti', 'id,ragione_sociale,nome,cognome,referente,indirizzo,cap,citta,telefono,cellulare,email', function (q) { return q.eq('id', fresca.cliente_id) }))[0] || contatto(fresca.cliente_id)
+      }
+      try { figure = await AD.leggi('cantiere_figure', 'ruolo,nome,cognome,telefono,email,azienda,nome_impresa,nome_referente', function (q) { return q.eq('cantiere_id', c.id).order('ruolo') }) }
+      catch (eF) { if (eF.sessioneAssente) throw eF; figure = null }
+      var ib = senzaIban ? { testo: TESTO_IBAN.nonLetto } : await ibanPerStampa(fresca)
+      el('stampa-commessa').innerHTML = htmlFoglio(fresca, k, figure, ib)
+      document.body.classList.add('stampa-attiva')
+      titoloPrima = document.title
+      document.title = 'Scheda commessa ' + (fresca.numero_commessa || fresca.nome || '')
+      if (ib.avviso && msg) msg.innerHTML = AC.avviso('warn', 'Sul foglio non c\'è l\'IBAN: nella Rubrica dei conti (Contabilità) manca il conto principale.')
+      b.disabled = false
+      if (typeof window.print !== 'function') throw new Error('Questo telefono non sa stampare da qui: apri l\'app dal browser o da un computer.')
+      window.print()
+      // Sui telefoni print() torna subito e «afterprint» può arrivare prima che il foglio sia pronto: si svuota al primo tocco dopo la stampa.
+      document.addEventListener('pointerdown', puliziaStampa, { once: true, capture: true })
+    } catch (e) {
+      b.disabled = false
+      puliziaStampa()
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      if (msg) msg.innerHTML = AC.avviso('err', '<strong>Non ho stampato.</strong> ' + esc(testoErrore(e)) +
+        '<div class="azioni-riga"><button type="button" class="btn btn-secondario btn-piccolo" data-azione="stampa">Riprova</button>' +
+        (eTitolare() && !senzaIban ? '<button type="button" class="btn btn-secondario btn-piccolo" data-azione="stampa-senza-iban">Stampa senza IBAN</button>' : '') + '</div>')
+    }
   }
 
   // ── Archivia / Cancella (v7) ──────────────────────────────────────────────
@@ -677,6 +938,11 @@ var CM = (function () {
     if (a === 'nuova') { location.hash = '#nuova-commessa'; return }
     if (a === 'archivia') { var ca = perId(aperto); if (ca) apriArchivia(ca); return }
     if (a === 'cancella') { var cc = perId(aperto); if (cc) apriCancella(cc); return }
+    if (a === 'stampa' || a === 'stampa-senza-iban') { var cs = perId(aperto); if (cs) stampa(cs, a === 'stampa-senza-iban'); return }
+    if (a === 'conto-cambia') { CONTO.form = true; disegnaConto(); return }
+    if (a === 'conto-annulla') { CONTO.form = false; disegnaConto(); return }
+    if (a === 'conto-salva') { salvaConto(); return }
+    if (a === 'conto-riprova') { if (aperto) caricaConto(aperto); return }
     if (a === 'nuovo-interno') { location.hash = '#nuovo-interno'; return }
     if (a === 'modifica') { location.hash = '#commessa/' + t.dataset.id + '/modifica'; return }
     if (a === 'cliente-cambia' || a === 'cliente-togli') {
@@ -698,6 +964,7 @@ var CM = (function () {
   // parti: ['commesse'] | ['commessa', id] | ['commessa', id, 'modifica'] | ['nuova-commessa'] | ['nuovo-interno'] | ['nuovo-contatto']
   async function mostra(parti, utente) {
     ST.utente = utente
+    puliziaStampa()
     await carica()
     var v = parti[0], id = parti[1] || null
     aperto = v === 'commessa' ? id : null

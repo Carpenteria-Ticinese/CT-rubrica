@@ -356,3 +356,33 @@ label.btn:focus-within { outline: 3px solid var(--primary); outline-offset: 2px;
 .cat-riga:last-child { border-bottom: 0; }
 .cat-riga .azioni-riga { margin-top: 8px; }
 .cat-meta { font-size: 16px; color: var(--text2); margin-top: 4px; }
+
+/* ── Conto incassi (v11, solo titolare) ───────────────────────────────────── */
+#cm-conto-blocco { padding-bottom: 14px; }
+#cm-conto-blocco > .azioni-riga { margin: 10px 0 4px; }
+.cm-iban { font-size: 21px; font-weight: 700; letter-spacing: .5px; overflow-wrap: anywhere; }
+.cm-conto-form { border: 2px dashed var(--border2); border-radius: var(--radius); padding: 4px 14px 14px; margin: 10px 0; }
+.cm-conto-form select { width: 100%; }
+.cm-conto-form .azioni-riga { margin-top: 8px; }
+.cm-storico-titolo { font-size: 17px; margin: 14px 0 4px; color: var(--text2); }
+.cm-storico { list-style: none; margin: 0 0 6px; padding: 0; }
+.cm-storico li { padding: 8px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.cm-storico li:last-child { border-bottom: 0; }
+
+/* ── Foglio di stampa (v11) ───────────────────────────────────────────────── */
+#stampa-commessa { display: none; }
+@media print {
+  @page { size: A4; margin: 15mm; }
+  html, body.stampa-attiva { background: #fff; color: #000; }
+  body.stampa-attiva > *:not(#stampa-commessa) { display: none !important; }
+  body.stampa-attiva #stampa-commessa { display: block; font-size: 11.5pt; line-height: 1.35; color: #000; }
+  #stampa-commessa h1 { font-size: 20pt; margin: 2pt 0 0; }
+  #stampa-commessa h2 { font-size: 12pt; margin: 11pt 0 3pt; padding-bottom: 2pt; border-bottom: 1.5pt solid #000; }
+  .sf-ditta { font-size: 12pt; font-weight: 700; }
+  .sf-testa { margin-bottom: 10pt; }
+  .sf-riga { display: flex; gap: 8pt; padding: 2pt 0; break-inside: avoid; }
+  .sf-etichetta { flex: 0 0 34%; font-weight: 600; }
+  .sf-valore { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sf-iban { font-size: 14pt; font-weight: 700; letter-spacing: .3pt; }
+  .sf-nota { margin: 2pt 0; font-style: italic; }
+}
