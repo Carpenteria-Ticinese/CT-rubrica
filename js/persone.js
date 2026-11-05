@@ -232,6 +232,16 @@ var PS = (function () {
       '<button type="button" class="btn btn-primario" data-ps-azione="nuova">' + ico('piu') + '<span>Nuova persona</span></button>' +
       '</div>'
 
+    // Archivio: solo con il filtro. Il numero c'è sempre, anche cercando: se la persona è lì, si vede subito.
+    // In alto, sotto la ricerca (Umberto 5.11.2026: in fondo all'elenco non lo vedeva). Con 0 persone il tasto resta e lo dice.
+    h += '<button type="button" class="btn btn-secondario btn-largo" data-ps-azione="ex" aria-expanded="' + ST.mostraEx + '">' +
+         ico(ST.mostraEx ? 'chiudi' : 'lucchetto') + '<span>' + (ST.mostraEx ? 'Nascondi' : 'Mostra') + ' archivio (' + ex.length + ')</span></button>'
+    if (ST.mostraEx) {
+      h += '<h2 class="sezione-titolo">' + ico('lucchetto') + 'Archivio <span class="sezione-nota">non lavorano più con noi · ' + ex.length + '</span></h2>'
+      h += '<div class="elenco elenco-ex">' + (ex.length ? ex.map(function (o) { return rigaPersona(o, o.id === idScelto) }).join('')
+            : '<div class="vuoto">' + (ST.cerca ? 'Nessuno in archivio per «' + esc(ST.cerca) + '».' : 'Nessuno in archivio.') + '</div>') + '</div>'
+    }
+
     h += '<h2 class="sezione-titolo">' + ico('persone') + 'Dipendenti <span class="sezione-nota">' + dip.length + '</span></h2>'
     h += '<div class="elenco" aria-live="polite">' + (dip.length ? dip.map(function (o) { return rigaPersona(o, o.id === idScelto) }).join('')
           : '<div class="vuoto">' + (ST.cerca ? 'Nessun dipendente per «' + esc(ST.cerca) + '».' : 'Nessun dipendente attivo.') + '</div>') + '</div>'
@@ -240,14 +250,6 @@ var PS = (function () {
     h += '<div class="elenco">' + (est.length ? est.map(function (o) { return rigaPersona(o, o.id === idScelto) }).join('')
           : '<div class="vuoto">' + (ST.cerca ? 'Nessun esterno per «' + esc(ST.cerca) + '».' : 'Nessun esterno. Con «Nuova persona» scegli «Esterno».') + '</div>') + '</div>'
 
-    // Archivio: solo con il filtro. Il numero c'è sempre, anche cercando: se la persona è lì, si vede subito.
-    h += '<button type="button" class="btn btn-secondario btn-largo btn-sezione" data-ps-azione="ex" aria-expanded="' + ST.mostraEx + '">' +
-         ico(ST.mostraEx ? 'chiudi' : 'lucchetto') + '<span>' + (ST.mostraEx ? 'Nascondi' : 'Mostra') + ' archivio (' + ex.length + ')</span></button>'
-    if (ST.mostraEx) {
-      h += '<h2 class="sezione-titolo">' + ico('lucchetto') + 'Archivio <span class="sezione-nota">non lavorano più con noi · ' + ex.length + '</span></h2>'
-      h += '<div class="elenco elenco-ex">' + (ex.length ? ex.map(function (o) { return rigaPersona(o, o.id === idScelto) }).join('')
-            : '<div class="vuoto">' + (ST.cerca ? 'Nessuno in archivio per «' + esc(ST.cerca) + '».' : 'Nessuno in archivio.') + '</div>') + '</div>'
-    }
     el('pane-elenco').innerHTML = h
     var c = el('ps-cerca')
     c.addEventListener('input', function () {
