@@ -404,14 +404,12 @@ var CM = (function () {
     if (titoloPrima !== null) { document.title = titoloPrima; titoloPrima = null }
   }
   var TESTO_IBAN = {
-    resp: 'IBAN: lo stampa il titolare',
     assente: 'IBAN: non stampato, la Rubrica dei conti non è ancora attiva',
     manca: 'IBAN: manca il conto principale nella Rubrica dei conti',
     nonLetto: 'IBAN: non stampato, non è stato possibile leggerlo'
   }
-  // Solo il titolare chiama la funzione. Il responsabile non la chiama mai: la risposta non deve nemmeno arrivare al suo telefono.
+  // Titolare e responsabile stampano la scheda con l'IBAN (Umberto, 5.11.2026). La funzione del database scrive ogni lettura nel registro.
   async function ibanPerStampa(c) {
-    if (!eTitolare()) return { testo: TESTO_IBAN.resp }
     try {
       var r = await AD.rpc('tm_conta_iban_per_stampa', { p_tipo: 'commessa', p_id: c.id })
       var riga = r && r[0]
@@ -485,7 +483,7 @@ var CM = (function () {
       if (e.sessioneAssente) return APP.sessioneScaduta()
       if (msg) msg.innerHTML = AC.avviso('err', '<strong>Non ho stampato.</strong> ' + esc(testoErrore(e)) +
         '<div class="azioni-riga"><button type="button" class="btn btn-secondario btn-piccolo" data-azione="stampa">Riprova</button>' +
-        (eTitolare() && !senzaIban ? '<button type="button" class="btn btn-secondario btn-piccolo" data-azione="stampa-senza-iban">Stampa senza IBAN</button>' : '') + '</div>')
+        (!senzaIban ? '<button type="button" class="btn btn-secondario btn-piccolo" data-azione="stampa-senza-iban">Stampa senza IBAN</button>' : '') + '</div>')
     }
   }
 
