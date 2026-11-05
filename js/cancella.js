@@ -1,10 +1,10 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Anagrafiche — CANCELLARE (v9, regole di Umberto del 4.11.2026)
+   Anagrafiche — CANCELLARE (v10, regole di Umberto del 4.11.2026)
 
    Solo il titolare, dopo aver riscritto la password, e va nel Registro. Una persona si cancella se non ha paghe, ore
    o altri dati da conservare per 10 anni (CO 958f): quelli bloccano (LEGAMI.legami), e si archivia. Documenti, dati
-   personali, contatti d'emergenza, cantieri visibili, ore contrattuali vanno via con la scheda (LEGAMI.viaCon): prima
-   l'avviso con quei dati e «Archivia invece». Commesse e contatti: ogni riga collegata blocca, come prima.
+   personali, contatti d'emergenza, cantieri visibili, ore contrattuali, riga di blocco per fine rapporto (DIR_11: l'account
+   resta bloccato) vanno via con la scheda (LEGAMI.viaCon): prima l'avviso con quei dati e «Archivia invece». Commesse e contatti: ogni riga collegata blocca, come prima.
 
    Il database fa la sua parte: DIR_02 (DELETE solo al titolare, il trigger scrive il registro) e DIR_10 (il trigger
    anag_blocca_con_dati conta anche le righe che le regole RLS nascondono e rifiuta con il codice 23503). Qui c'è il resto:
@@ -49,7 +49,7 @@ var CX = (function () {
     bolle_consegna: ['bolla di consegna', 'bolle di consegna'],
     piano_giorno: ['riga nel piano del giorno', 'righe nel piano del giorno'],
     mezzi: ['mezzo assegnato', 'mezzi assegnati'],
-    anag_blocchi_fine_rapporto: ['blocco di accesso per fine rapporto', 'blocchi di accesso per fine rapporto'],
+    anag_blocchi_fine_rapporto: ['nota del blocco di accesso', 'note del blocco di accesso'],
     anag_periodi_rapporto: ['periodo di rapporto passato', 'periodi di rapporto passati'],
     anag_file_persona: ['elenco dei file', 'elenco dei file'],
     tm_documenti: ['documento nell\'archivio vecchio', 'documenti nell\'archivio vecchio'],
@@ -101,7 +101,7 @@ var CX = (function () {
         { t: 'assenze', c: 'operaio_id' },
         { t: 'regia', c: 'operaio_id' }, { t: 'spese', c: 'operaio_id' }, { t: 'bolle_consegna', c: 'operaio_id' },
         { t: 'piano_giorno', c: 'operaio_id' }, { t: 'mezzi', c: 'operaio_default_id' },
-        { t: 'anag_blocchi_fine_rapporto', c: 'operaio_id' }, { t: 'tm_documenti', c: 'operaio_id' },
+        { t: 'tm_documenti', c: 'operaio_id' },
         { t: 'anag_periodi_rapporto', c: 'operaio_id' },
         { t: 'tm_sicurezza_dpi', c: 'operaio_id', ancheAccount: true },
         { t: 'pl_assegnazioni', c: 'persona_id', ancheAccount: true },
@@ -111,7 +111,7 @@ var CX = (function () {
       ],
       viaCon: [
         { t: 'documenti_operai', c: 'operaio_id' }, { t: 'operai_dati_personali', c: 'operaio_id' }, { t: 'operai_contatti_emergenza', c: 'operaio_id' },
-        { t: 'cantieri_visibili', c: 'operaio_id' }, { t: 'ore_contrattuali', c: 'operaio_id' }
+        { t: 'cantieri_visibili', c: 'operaio_id' }, { t: 'ore_contrattuali', c: 'operaio_id' }, { t: 'anag_blocchi_fine_rapporto', c: 'operaio_id' }
       ],
       restano: [{ t: 'foto', c: 'operaio_id', ancheAccount: true }]
     },
