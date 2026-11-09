@@ -9,7 +9,7 @@
    - «Archivia» = attivo false, i dati restano. «Cancella» (v7): solo il titolare, con password, avviso e registro
      (js/cancella.js); se il contatto è collegato (commessa, Esterno, Contabilità, Materiali, Preventivi) il database
      rifiuta: si spiega cosa blocca e si propone «Archivia invece».
-   - Omonimi: avviso, mai blocco. CAP ↔ località: aiuto, mai blocco.
+   - Omonimi: avviso, mai blocco. NPA ↔ località: aiuto, mai blocco.
    - Categorie multiple (rubrica_categorie) come nella Rubrica: si assegnano e si tolgono nel modulo,
      si crea una categoria nuova (la tabella permette leggere/aggiungere/modificare, mai cancellare).
      v7: «Gestisci categorie» (#categorie) rinomina e disattiva: tocca solo nome e attiva, l'id non cambia mai;
@@ -453,7 +453,7 @@ var KT = (function () {
       campo('kt-email', 'Email', inp('kt-email', f.email, ' inputmode="email" maxlength="120"')) +
       campo('kt-sito_web', 'Sito', inp('kt-sito_web', f.sito_web, ' inputmode="url" maxlength="160"')) + '</div>'
     h += '<div class="blocco"><h3 class="blocco-titolo">Indirizzo</h3>' + campo('kt-indirizzo', 'Via e numero', inp('kt-indirizzo', f.indirizzo, ' maxlength="160"')) +
-      '<div class="campi-due">' + campo('kt-cap', 'CAP', inp('kt-cap', f.cap, ' inputmode="numeric" maxlength="10" list="kt-cap-lista"') + '<datalist id="kt-cap-lista"></datalist>') +
+      '<div class="campi-due">' + campo('kt-cap', 'NPA', inp('kt-cap', f.cap, ' inputmode="numeric" maxlength="10" list="kt-cap-lista"') + '<datalist id="kt-cap-lista"></datalist>') +
         campo('kt-citta', 'Località', inp('kt-citta', f.citta, ' maxlength="120" list="kt-loc-lista"') + '<datalist id="kt-loc-lista"></datalist>') + '</div>' +
       '<div id="kt-cap-aiuto" class="campo-aiuto"></div>' +
       campo('kt-paese', 'Paese', '<select id="kt-paese">' + AC.opzioniPaese(f.paese) + '</select>') + '</div>'

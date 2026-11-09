@@ -5,5 +5,5 @@
 var ANAG_CONFIG = {
   SUPABASE_URL: 'https://wgidgbauhivdctdxfjnk.supabase.co',
   SUPABASE_KEY: 'sb_publishable_Ke7MTQGHPYVXvKInfOrUQQ_Ys6qKJvD',
-  VERSIONE: 11.2
+  VERSIONE: 11.3
 }

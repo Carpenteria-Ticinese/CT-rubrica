@@ -28,9 +28,17 @@ var CM = (function () {
 
   var STATI = ['Da fare', 'Inviata', 'In corso', 'Persa', 'Conclusa']
   var CLASSE_STATO = { 'Da fare': 'st-dafare', 'Inviata': 'st-inviata', 'In corso': 'st-incorso', 'Persa': 'st-persa', 'Conclusa': 'st-conclusa' }
+  // 11.3 (Umberto 9.11.2026): SOLO le parole a schermo e in stampa. Nel database i valori restano quelli di sempre.
+  // «Da fare» non diceva se era l'offerta o il lavoro. «Lavoro da iniziare» non ha ancora un valore nel database: non c'è.
+  var PAROLA_STATO = {
+    'Da fare': ['📝', 'Offerta da fare'], 'Inviata': ['📤', 'Offerta inviata'], 'In corso': ['🔨', 'Lavoro in corso'],
+    'Persa': ['❌', 'Persa'], 'Conclusa': ['🏁', 'Lavoro finito']
+  }
+  function parolaStato(s) { var p = PAROLA_STATO[s]; return p ? p[0] + ' ' + p[1] : String(s || '') }
+  function htmlStato(s) { var p = PAROLA_STATO[s]; return p ? '<span aria-hidden="true">' + p[0] + '</span> ' + esc(p[1]) : esc(s) }
   var FILTRI = [
-    { k: 'aperte', n: 'Aperte' }, { k: 'Da fare', n: 'Da fare' }, { k: 'Inviata', n: 'Inviate' },
-    { k: 'In corso', n: 'In corso' }, { k: 'Persa', n: 'Perse' }, { k: 'Conclusa', n: 'Concluse' },
+    { k: 'aperte', n: 'Aperte' }, { k: 'Da fare', n: 'Offerte da fare' }, { k: 'Inviata', n: 'Offerte inviate' },
+    { k: 'In corso', n: 'Lavori in corso' }, { k: 'Persa', n: 'Perse' }, { k: 'Conclusa', n: 'Lavori finiti' },
     { k: 'senza', n: 'Senza stato' }, { k: 'tutte', n: 'Tutte' }
   ]
   // codice_interno arriva con l'SQL ANAG_F2_03: se manca si legge senza (l'interno si riconosce dal tipo).
@@ -107,7 +115,7 @@ var CM = (function () {
   function badgeStato(c) {
     if (eInterno(c)) return '<span class="badge st-interno">Interno</span>'
     var s = c.stato_commessa
-    return s ? '<span class="badge ' + CLASSE_STATO[s] + '">' + esc(s) + '</span>'
+    return s ? '<span class="badge ' + (CLASSE_STATO[s] || '') + '">' + htmlStato(s) + '</span>'
              : '<span class="badge st-senza">Senza stato</span>'
   }
   function rigaCommessa(c, scelta) {
@@ -137,7 +145,9 @@ var CM = (function () {
       '</div>' +
       '<div class="filtri" role="group" aria-label="Filtra per stato">' +
         FILTRI.map(function (f) {
+          var p = PAROLA_STATO[f.k]
           return '<button type="button" class="filtro' + (ST.filtro === f.k ? ' filtro-attivo' : '') + '" data-filtro="' + esc(f.k) + '" aria-pressed="' + (ST.filtro === f.k) + '">' +
+                 (p ? '<span class="pallino ' + CLASSE_STATO[f.k] + '" aria-hidden="true"></span><span aria-hidden="true">' + p[0] + '</span> ' : '') +
                  esc(f.n) + ' <span class="filtro-n">' + conta[f.k] + '</span></button>'
         }).join('') +
       '</div>'
@@ -218,7 +228,7 @@ var CM = (function () {
     var indirizzo = [c.via, [c.cap, c.citta].filter(Boolean).join(' '), c.paese && c.paese !== 'CH' ? AC.nomePaese(c.paese) || c.paese : ''].filter(Boolean).join(', ')
     h += '<div class="blocco">' +
       campoLettura('Numero commessa', esc(c.numero_commessa || '—')) +
-      campoLettura('Stato commessa', c.stato_commessa ? esc(c.stato_commessa) : '<span class="vuoto-inline">non ancora scelto</span>') +
+      campoLettura('Stato commessa', c.stato_commessa ? htmlStato(c.stato_commessa) : '<span class="vuoto-inline">non ancora scelto</span>') +
       campoLettura('Cliente', clienteHtml) +
       campoLettura('Località', esc(c.luogo || '')) +
       campoLettura('Indirizzo', esc(indirizzo)) +
@@ -479,7 +489,7 @@ var CM = (function () {
     var h = '<div class="sf-testa"><div class="sf-ditta">Carpenteria Ticinese Sagl</div><h1>Scheda commessa</h1></div>'
     h += '<div class="sf-gruppo">' +
       rigaFoglio('Numero commessa', c.numero_commessa) + rigaFoglio('Nome', nomeMostrato(c)) + rigaFoglio('Codice', c.codice_interno) +
-      rigaFoglio('Tipo', eInterno(c) ? 'Interno' : 'Commessa') + rigaFoglio('Stato', c.stato_commessa || 'non ancora scelto') + '</div>'
+      rigaFoglio('Tipo', eInterno(c) ? 'Interno' : 'Commessa') + rigaFoglio('Stato', c.stato_commessa ? parolaStato(c.stato_commessa) : 'non ancora scelto') + '</div>'
     h += '<h2>Cliente</h2><div class="sf-gruppo">' +
       rigaFoglio('Nome', k ? AC.nomeContatto(k) : c.committente || 'non indicato') +
       (k ? rigaFoglio('Referente', k.referente) + rigaFoglio('Indirizzo', [k.indirizzo, cittaK].filter(Boolean).join(', ')) +
@@ -542,7 +552,7 @@ var CM = (function () {
   function htmlFine(c) {
     var tit = ST.utente && ST.utente.ruolo === 'titolare', az = '', h = ''
     if (!eInterno(c)) {
-      if (archiviata(c)) h += '<p class="nota">' + ico('lucchetto') + '<span>Archiviata: stato «' + esc(c.stato_commessa) + '». Per riaprirla: «Modifica» e cambia lo stato.</span></p>'
+      if (archiviata(c)) h += '<p class="nota">' + ico('lucchetto') + '<span>Archiviata: stato «' + esc(parolaStato(c.stato_commessa)) + '». Per riaprirla: «Modifica» e cambia lo stato.</span></p>'
       else {
         h += '<p class="nota">Lavoro finito o non preso? Archivia: i dati restano tutti.</p>'
         az += '<button type="button" class="btn btn-primario" data-azione="archivia">' + ico('lucchetto') + '<span>Archivia</span></button>'
@@ -558,11 +568,11 @@ var CM = (function () {
   }
   // Scrive solo stato_commessa (il suo). cantieri.stato è dell'App Cantieri: se è ancora Attivo lo si dice.
   function apriArchivia(c) {
-    var corpo = '<p>Archiviare non perde niente: sparisce dalle commesse aperte, i dati restano e si ritrova con i filtri «Concluse» e «Perse».</p>' +
+    var corpo = '<p>Archiviare non perde niente: sparisce dalle commesse aperte, i dati restano e si ritrova con i filtri «Lavori finiti» e «Perse».</p>' +
       (c.stato === 'Attivo' ? AC.avviso('warn', 'Nell\'App Cantieri resta «Attivo» finché non la chiudi lì: lo stato dei lavori lo decide quell\'app.') : '') +
       '<div id="cx-archivia-msg"></div><div class="vela-azioni">' +
-      CX.bottone('conclusa', 'Conclusa: lavoro finito', 'btn-primario', 'ok', 'cx-primo') +
-      CX.bottone('persa', 'Persa: non l\'abbiamo presa', 'btn-primario', 'chiudi') +
+      CX.bottone('conclusa', '🏁 Lavoro finito', 'btn-primario', 'ok', 'cx-primo') +
+      CX.bottone('persa', '❌ Persa: non l\'abbiamo presa', 'btn-primario', 'chiudi') +
       CX.bottone('chiudi', 'Annulla', 'btn-secondario', 'chiudi') + '</div>'
     function salva(stato) {
       return async function () {
@@ -585,8 +595,8 @@ var CM = (function () {
     CX.cancella({
       tipo: 'commessa', id: c.id, nome: (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c), elenco: '#commesse', utente: ST.utente,
       archivia: eInterno(c) || archiviata(c) ? null : function () { apriArchivia(c) },
-      cosaArchivia: 'stato Conclusa o Persa, i dati restano tutti',
-      giaArchiviato: archiviata(c) ? 'È già archiviata: stato «' + c.stato_commessa + '».' : null
+      cosaArchivia: 'stato «Lavoro finito» o «Persa», i dati restano tutti',
+      giaArchiviato: archiviata(c) ? 'È già archiviata: stato «' + parolaStato(c.stato_commessa) + '».' : null
     })
   }
 
@@ -697,7 +707,7 @@ var CM = (function () {
     } else {
       // Stato commessa
       var opz = (f.stato_commessa ? '' : '<option value="" selected>— non ancora scelto —</option>') +
-        STATI.map(function (s) { return '<option' + (s === f.stato_commessa ? ' selected' : '') + '>' + esc(s) + '</option>' }).join('')
+        STATI.map(function (s) { return '<option value="' + esc(s) + '"' + (s === f.stato_commessa ? ' selected' : '') + '>' + esc(parolaStato(s)) + '</option>' }).join('')
       h += campo('stato', 'Stato commessa', '<select id="cm-stato">' + opz + '</select>', 'Lo scrive solo Anagrafiche. Lo stato dei lavori lo decide l\'App Cantieri.')
       h += '</div>'
 
@@ -709,7 +719,7 @@ var CM = (function () {
         campo('luogo', 'Località', input('luogo', f.luogo, ' autocomplete="off" maxlength="200"'), 'La parola corta che si vede negli elenchi (es. «Camorino»).') +
         campo('via', 'Via e numero', input('via', f.via, ' autocomplete="off" maxlength="200"')) +
         '<div class="campi-due">' +
-          campo('cap', 'CAP', input('cap', f.cap, ' autocomplete="off" maxlength="10" inputmode="numeric" list="cm-cap-lista"') + '<datalist id="cm-cap-lista"></datalist>') +
+          campo('cap', 'NPA', input('cap', f.cap, ' autocomplete="off" maxlength="10" inputmode="numeric" list="cm-cap-lista"') + '<datalist id="cm-cap-lista"></datalist>') +
           campo('citta', 'Città', input('citta', f.citta, ' autocomplete="off" maxlength="120" list="cm-loc-lista"') + '<datalist id="cm-loc-lista"></datalist>') +
         '</div><div id="cm-cap-aiuto" class="campo-aiuto"></div>' +
         campo('paese', 'Paese', '<select id="cm-paese">' + AC.opzioniPaese(f.paese) + '</select>') +
@@ -787,7 +797,8 @@ var CM = (function () {
       '<div class="blocco"><h3 class="blocco-titolo">Recapiti</h3>' +
         campoCt('telefono', 'Telefono', ' inputmode="tel"') + campoCt('email', 'Email', ' inputmode="email"') + '</div>' +
       '<div class="blocco"><h3 class="blocco-titolo">Indirizzo</h3>' + campoCt('indirizzo', 'Via e numero', '') +
-        '<div class="campi-due">' + campoCt('cap', 'CAP', ' inputmode="numeric"') + campoCt('citta', 'Città', '') + '</div>' +
+        '<div class="campi-due">' + campoCt('cap', 'NPA', ' inputmode="numeric" maxlength="10" list="ct-cap-lista"') + campoCt('citta', 'Località', ' list="ct-citta-lista"') + '</div>' +
+        '<datalist id="ct-cap-lista"></datalist><datalist id="ct-citta-lista"></datalist><div id="ct-cap-aiuto" class="campo-aiuto"></div>' +
         '<div class="campo"><label for="ct-paese">Paese</label><select id="ct-paese">' + AC.opzioniPaese(AC.PAESE_PREDEFINITO) + '</select></div></div>' +
       '<div id="ct-avvisi"></div>' +
       '<div class="barra-salva">' +
@@ -802,6 +813,7 @@ var CM = (function () {
       })
     })
     el('ct-modulo').addEventListener('submit', function (ev) { ev.preventDefault(); salvaContatto() })
+    if (window.CAP) CAP.collega('ct-cap', 'ct-citta', 'ct-cap-aiuto', 'ct-paese')
     el('ct-ragione').focus()
   }
   function campoCt(id, etichetta, extra, obbligatorio) {

@@ -867,7 +867,9 @@ var PS = (function () {
       h += '<div class="sotto-modulo"><p class="nota">' + ico('info') + 'La ditta nuova va nei Contatti come fornitore.</p>' +
         campo('ps-nd-ragione', 'Nome della ditta', input('ps-nd-ragione', '', ' autocomplete="off" maxlength="160"'), '', true) +
         campo('ps-nd-telefono', 'Telefono della ditta', input('ps-nd-telefono', '', ' autocomplete="off" inputmode="tel" maxlength="40"')) +
-        campo('ps-nd-citta', 'Città', input('ps-nd-citta', '', ' autocomplete="off" maxlength="120"')) +
+        '<div class="campi-due">' + campo('ps-nd-cap', 'NPA', input('ps-nd-cap', '', ' autocomplete="off" inputmode="numeric" maxlength="10" list="ps-nd-cap-lista"') + '<datalist id="ps-nd-cap-lista"></datalist>') +
+          campo('ps-nd-citta', 'Località', input('ps-nd-citta', '', ' autocomplete="off" maxlength="120" list="ps-nd-loc-lista"') + '<datalist id="ps-nd-loc-lista"></datalist>') + '</div>' +
+        '<div id="ps-nd-cap-aiuto" class="campo-aiuto"></div>' +
         '<div id="ps-nd-avvisi"></div><div class="azioni-riga">' +
         '<button type="button" class="btn btn-primario btn-piccolo" data-ps-azione="ditta-salva">' + ico('salva') + '<span>Salva la ditta</span></button>' +
         '<button type="button" class="btn btn-secondario btn-piccolo" data-ps-azione="ditta-annulla">' + ico('chiudi') + '<span>Annulla</span></button></div></div>'
@@ -894,6 +896,7 @@ var PS = (function () {
     }).join('') + (lista.length > (t ? 12 : 8) ? '<p class="nota">… scrivi qualche lettera per trovare le altre.</p>' : '')
   }
   function collegaDitta() {
+    if (el('ps-nd-cap') && window.CAP) CAP.collega('ps-nd-cap', 'ps-nd-citta', 'ps-nd-cap-aiuto')   // ditta nuova: NPA ↔ località
     var c = el('ps-ditta-cerca'); if (!c) return
     c.addEventListener('input', function () { el('ps-ditta-risultati').innerHTML = risultatiDitta(c.value) })
   }
@@ -910,7 +913,7 @@ var PS = (function () {
     }
     try {
       var k = await AD.inserisci('tm_contatti', {
-        ragione_sociale: ragione, telefono: vuotoNull(v('ps-nd-telefono')), citta: vuotoNull(v('ps-nd-citta')),
+        ragione_sociale: ragione, telefono: vuotoNull(v('ps-nd-telefono')), cap: vuotoNull(v('ps-nd-cap')), citta: vuotoNull(v('ps-nd-citta')),
         paese: AC.PAESE_PREDEFINITO, categoria: 'fornitore', e_fornitore: true, categorie: ['fornitori'], attivo: true
         // azienda_id: la mette il database (trigger anag_contatti_azienda)
       }, COL_CONTATTI)
@@ -1107,7 +1110,7 @@ var PS = (function () {
       AC.avviso('warn', '<strong>Niente dati sanitari</strong> (malattie, allergie, farmaci, certificati medici). Li vedono solo titolare e responsabile.') +
       '<div class="blocco">' + campo('dp-data_nascita', 'Data di nascita', input('dp-data_nascita', d.data_nascita, '', 'date')) +
       campo('dp-via', 'Via e numero', input('dp-via', d.via, ' autocomplete="off" maxlength="160"')) +
-      '<div class="campi-due">' + campo('dp-cap', 'CAP', input('dp-cap', d.cap, ' autocomplete="off" inputmode="numeric" maxlength="10" list="dp-cap-lista"') + '<datalist id="dp-cap-lista"></datalist>') +
+      '<div class="campi-due">' + campo('dp-cap', 'NPA', input('dp-cap', d.cap, ' autocomplete="off" inputmode="numeric" maxlength="10" list="dp-cap-lista"') + '<datalist id="dp-cap-lista"></datalist>') +
         campo('dp-localita', 'Località', input('dp-localita', d.localita, ' autocomplete="off" maxlength="120" list="dp-loc-lista"') + '<datalist id="dp-loc-lista"></datalist>') + '</div>' +
       '<div id="dp-cap-aiuto" class="campo-aiuto"></div>' +
       campo('dp-numero_avs', 'Numero AVS', input('dp-numero_avs', d.numero_avs, ' autocomplete="off" inputmode="numeric" maxlength="16" placeholder="756.1234.5678.97"')) + '</div>' +
@@ -1428,7 +1431,7 @@ var PS = (function () {
     if (a === 'cancella') { var oc = perId(aperto); if (oc) apriCancella(oc); return }
     if (a === 'ex') { ST.mostraEx = !ST.mostraEx; disegnaElenco(aperto); return }
     if (a === 'ditta-cambia') { leggiModulo(); ST.form.ditta_id = null; el('ps-ditta').innerHTML = htmlDitta(); collegaDitta(); el('ps-ditta-cerca').focus(); return }
-    if (a === 'ditta-nuova') { leggiModulo(); ST.form.nuovaDitta = true; el('ps-ditta').innerHTML = htmlDitta(); el('ps-nd-ragione').focus(); return }
+    if (a === 'ditta-nuova') { leggiModulo(); ST.form.nuovaDitta = true; el('ps-ditta').innerHTML = htmlDitta(); collegaDitta(); el('ps-nd-ragione').focus(); return }
     if (a === 'ditta-annulla') { ST.form.nuovaDitta = false; el('ps-ditta').innerHTML = htmlDitta(); collegaDitta(); return }
     if (a === 'ditta-salva') { salvaNuovaDitta(); return }
     if (a === 'ditta-comunque') { ST.form.dittaComunque = true; salvaNuovaDitta(); return }
