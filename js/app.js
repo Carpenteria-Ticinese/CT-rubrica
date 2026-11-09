@@ -198,14 +198,41 @@ var APP = (function () {
     })
   }
 
-  function chiediConferma(esciPure) {
+  // testi: facoltativo, { titolo, testo, esci } al posto delle scritte di index.html (11.4: «Nuova versione»).
+  var scritteVela = null
+  function chiediConferma(esciPure, testi) {
     var v = el('vela-uscita'); if (!v) return
-    el('vela-esci').onclick = function () { chiudiVela(); esciPure() }
+    var t = el('vela-titolo'), p = v.querySelector('p'), b = el('vela-esci')
+    if (!scritteVela) scritteVela = { titolo: t.textContent, testo: p.textContent, esci: b.textContent }
+    var s = testi || scritteVela
+    t.textContent = s.titolo; p.textContent = s.testo; b.textContent = s.esci
+    b.onclick = function () { chiudiVela(); esciPure() }
     el('vela-resta').onclick = chiudiVela
     v.hidden = false
     el('vela-resta').focus()
   }
   function chiudiVela() { var v = el('vela-uscita'); if (v) v.hidden = true }
+
+  // ── 11.4: fascia «🔄 Nuova versione: aggiorna» (aggiorna.js, uguale in tutte le app) ─────────
+  // 1. Dati non salvati: il tasto prima avvisa «Hai dati non salvati: salvali prima» (stessa finestra di Indietro).
+  //    «Resta qui» = non aggiorna, la fascia resta. «Aggiorna lo stesso» = butta la bozza e aggiorna.
+  // 2. L'altezza della fascia va in --ct-agg-h (css): la testata e il menu le scivolano sotto, non coperti.
+  var aggiornaPassa = false
+  function aggiornaConDati(ev) {
+    var tasto = ev.target && ev.target.closest ? ev.target.closest('#ct-aggiorna-tasto') : null
+    if (!tasto || aggiornaPassa || !sporco()) return
+    ev.stopImmediatePropagation(); ev.preventDefault()
+    chiediConferma(function () {
+      scarta(); rifirma()            // niente più «non salvato»: anche il browser non chiede all'uscita
+      aggiornaPassa = true; tasto.click(); aggiornaPassa = false
+    }, { titolo: 'Hai dati non salvati: salvali prima.',
+         testo: 'C\'è una versione nuova dell\'app. Se aggiorni adesso, i dati che hai scritto e non salvato si perdono.',
+         esci: 'Aggiorna lo stesso' })
+  }
+  function misuraFascia() {
+    var b = el('ct-aggiorna')
+    document.documentElement.style.setProperty('--ct-agg-h', (b ? b.offsetHeight : 0) + 'px')
+  }
 
   function popstate() {
     var st = history.state, nuovo
@@ -251,6 +278,11 @@ var APP = (function () {
       if (a) { scarta(); libera() }
     }, true)
     window.addEventListener('beforeunload', function (ev) { if (sporco()) { ev.preventDefault(); ev.returnValue = '' } })
+    // 11.4: fascia della versione nuova (fase di cattura: arriva prima del tasto di aggiorna.js)
+    window.addEventListener('click', aggiornaConDati, true)
+    new MutationObserver(misuraFascia).observe(document.body, { childList: true })
+    window.addEventListener('resize', misuraFascia)
+    misuraFascia()
     document.addEventListener('keydown', function (ev) {
       var v = el('vela-uscita')
       if (ev.key === 'Escape' && v && !v.hidden) { ev.preventDefault(); chiudiVela() }
@@ -267,7 +299,7 @@ var APP = (function () {
 
   return { avvia: avvia, sessioneScaduta: sessioneScaduta, libera: libera, livello: livello, chiudiLivello: chiudiLivello, rifirma: rifirma,
            // per le prove
-           _sporco: sporco, _pos: function () { return pos } }
+           _sporco: sporco, _pos: function () { return pos }, _misuraFascia: misuraFascia }
 })()
 
 document.addEventListener('DOMContentLoaded', APP.avvia)

@@ -83,8 +83,11 @@ h1, h2, h3 { line-height: 1.25; margin: 0; }
 .testata {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px 16px; background: var(--testata); color: var(--on-testata); border-bottom: 1px solid var(--primary-dk);
-  position: sticky; top: 0; z-index: 20;
+  position: sticky; top: var(--ct-agg-h, 0px); z-index: 20;
 }
+/* 11.4: fascia «🔄 Nuova versione: aggiorna» (aggiorna.js). --ct-agg-h = sua altezza (0 se non c'è), la scrive js/app.js.
+   Testata, menu, scheda e finestre scendono di tanto: la fascia non copre niente. */
+@media print { #ct-aggiorna { display: none !important; } }
 .testata h1 { font-size: 26px; color: var(--on-testata); }
 .testata .ditta { display: flex; align-items: center; gap: 8px; color: var(--on-testata); text-transform: none; font-size: 17px; font-weight: 700; letter-spacing: 0; }
 .logo-testata { border-radius: 6px; flex: none; }
@@ -127,9 +130,9 @@ body.con-dettaglio .pane-dettaglio { display: block; }
   .testata { min-height: 80px; }
   /* bottom: auto — altrimenti il «bottom: 0» del telefono spinge il menu sopra la testata */
   .menu {
-    position: sticky; top: 80px; bottom: auto; align-self: start; grid-row: 2 / 4;
+    position: sticky; top: calc(80px + var(--ct-agg-h, 0px)); bottom: auto; align-self: start; grid-row: 2 / 4;
     flex-direction: column; border-top: 0; border-right: 1px solid var(--border);
-    height: calc(100vh - 80px); padding: 12px 8px; gap: 4px; background: var(--surface);
+    height: calc(100vh - 80px - var(--ct-agg-h, 0px)); padding: 12px 8px; gap: 4px; background: var(--surface);
   }
   .menu-voce { flex: none; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 0 16px; border-radius: 10px; font-size: 18px; }
   .contenuto {
@@ -137,7 +140,7 @@ body.con-dettaglio .pane-dettaglio { display: block; }
     padding: 20px 24px 40px; width: 100%;
   }
   .pane-dettaglio, body.con-dettaglio .pane-elenco { display: block; }
-  .pane-dettaglio { position: sticky; top: 96px; max-height: calc(100vh - 116px); overflow: auto; }
+  .pane-dettaglio { position: sticky; top: calc(96px + var(--ct-agg-h, 0px)); max-height: calc(100vh - 116px - var(--ct-agg-h, 0px)); overflow: auto; }
   .solo-telefono { display: none !important; }
   .piede { grid-column: 2; margin: 0; padding: 12px; }
 }
@@ -323,7 +326,7 @@ input[type=checkbox] { width: 24px; height: 24px; }
 @media (min-width: 1000px) { .barra-salva { bottom: 0; } }
 
 /* ── Finestra «modifiche non salvate» (si chiude anche con Indietro) ──────── */
-.vela { position: fixed; inset: 0; z-index: 100; background: rgba(15,23,32,.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.vela { position: fixed; inset: 0; z-index: 100; background: rgba(15,23,32,.6); display: flex; align-items: center; justify-content: center; padding: 16px; padding-top: calc(16px + var(--ct-agg-h, 0px)); }
 .vela[hidden] { display: none; }
 .vela-scatola { background: var(--surface); color: var(--text); border-radius: var(--radius); box-shadow: 0 8px 30px rgba(0,0,0,.35); padding: 22px 20px; width: 100%; max-width: 440px; border: 3px solid var(--primary); }
 .vela-scatola h2 { margin: 0 0 8px; font-size: 22px; }
