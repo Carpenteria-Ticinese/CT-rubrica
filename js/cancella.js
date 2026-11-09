@@ -75,6 +75,10 @@ var CX = (function () {
     tm_conta_classificazioni: ['classificazione in Contabilità', 'classificazioni in Contabilità'],
     tm_conta_cantiere_contratto: ['contratto in Contabilità', 'contratti in Contabilità'],
     tm_conta_rubrica_assegnazioni: ['periodo nello storico del conto incassi', 'periodi nello storico del conto incassi'],
+    anag_commessa_scheda: ['scheda commessa (accesso, ponteggio, permessi, rischi)', 'schede commessa'],
+    anag_commessa_contratto: ['termine e penali', 'termini e penali'],
+    anag_commessa_ruoli: ['ruolo del cantiere', 'ruoli del cantiere'],
+    anag_commessa_storico: ['riga nello storico della scheda', 'righe nello storico della scheda'],
     tm_sicurezza_dpi: ['dotazione di sicurezza', 'dotazioni di sicurezza'],
     pl_assegnazioni: ['assegnazione nel Calendario', 'assegnazioni nel Calendario'],
     pl_assegnazioni_previste: ['assegnazione prevista nel Calendario', 'assegnazioni previste nel Calendario'],
@@ -88,7 +92,7 @@ var CX = (function () {
 
   // legami: ogni riga in una di queste tabelle BLOCCA la cancellazione. Le chiavi esterne (pg_constraint, 4.11.2026)
   // più le colonne senza chiave esterna che DIR_10 guarda a mano. Stesso elenco del database, che però lo legge dal catalogo.
-  // viaCon: solo persone. Vanno via con la scheda (chiave a cascata): si dicono nell'avviso e finiscono nel riepilogo del registro.
+  // viaCon: persone e (ANAG_11) commesse. Vanno via con la scheda o la commessa (chiave a cascata): si dicono nell'avviso e finiscono nel riepilogo del registro.
   // restano: solo persone, non bloccano e non vanno via (foto del cantiere): si dice soltanto quante sono.
   // somma: colonna da sommare e mostrare («… ore»).
   // ancheAccount: senza chiave esterna; il database confronta sia l'id della scheda sia l'id dell'account
@@ -130,6 +134,11 @@ var CX = (function () {
         { t: 'tm_conta_fatture_acquisto', c: 'cantiere_id' }, { t: 'tm_conta_fatture', c: 'cantiere_id' },
         { t: 'tm_conta_offerte', c: 'cantiere_id' }, { t: 'tm_conta_cantiere_contratto', c: 'cantiere_id' },
         { t: 'tm_conta_rubrica_assegnazioni', c: 'cantiere_id' }   // CONT_104: RESTRICT. Senza CONT_104 la tabella manca e si salta.
+      ],
+      // ANAG_11 + DIR_15 (Umberto 9.11.2026): la scheda commessa va via con la commessa. Senza ANAG_11 le tabelle mancano e si saltano.
+      viaCon: [
+        { t: 'anag_commessa_scheda', c: 'cantiere_id' }, { t: 'anag_commessa_contratto', c: 'cantiere_id' },
+        { t: 'anag_commessa_ruoli', c: 'cantiere_id' }, { t: 'anag_commessa_storico', c: 'cantiere_id' }
       ]
     },
     contatto: {
@@ -137,7 +146,8 @@ var CX = (function () {
       legami: [
         { t: 'cantieri', c: 'cliente_id' }, { t: 'operai', c: 'ditta_id' }, { t: 'rf_fornitori', c: 'contatto_id' },
         { t: 'tm_conta_fatture', c: 'contatto_id' }, { t: 'tm_conta_fatture_acquisto', c: 'contatto_id' },
-        { t: 'tm_conta_movimenti_propri', c: 'contatto_id' }, { t: 'tm_conta_offerte', c: 'contatto_id' }, { t: 'pv_offerte', c: 'cliente_id' }
+        { t: 'tm_conta_movimenti_propri', c: 'contatto_id' }, { t: 'tm_conta_offerte', c: 'contatto_id' }, { t: 'pv_offerte', c: 'cliente_id' },
+        { t: 'anag_commessa_ruoli', c: 'contatto_id' }   // ANAG_11: RESTRICT, il contatto con un ruolo si archivia
       ]
     }
   }
@@ -310,7 +320,7 @@ var CX = (function () {
     var L = LEGAMI[o.tipo], h = '', fl = an.file
     o.an = an
     h += AC.avviso('warn', '<strong>Si cancella per sempre.</strong> Non si torna indietro.')
-    if (an.via.length) h += AC.avviso('warn', '<strong>Vanno via con la scheda:</strong>' + lista(an.via))
+    if (an.via.length) h += AC.avviso('warn', '<strong>Vanno via con ' + esc(L.cosa) + ':</strong>' + lista(an.via))
     else if (!fl.da_togliere.length) h += '<p class="nota"><span>Solo ' + esc(L.cosa) + ': nessun dato collegato.</span></p>'
     if (fl.da_togliere.length) h += AC.avviso('warn', '<strong>' + (fl.da_togliere.length === 1 ? 'Si cancella anche 1 file' : 'Si cancellano anche ' + fl.da_togliere.length + ' file') + ' dall\'archivio:</strong>' + listaFile(fl.da_togliere))
     if (fl.condivisi.length) h += '<p class="nota">' + ico('info') + '<span>' + (fl.condivisi.length === 1 ? 'Resta nell\'archivio 1 file usato' : 'Restano nell\'archivio ' + fl.condivisi.length + ' file usati') + ' anche da un\'altra riga:</span></p>' + listaFile(fl.condivisi)
