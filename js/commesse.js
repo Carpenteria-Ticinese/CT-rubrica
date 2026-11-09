@@ -228,22 +228,23 @@ var CM = (function () {
       campoLettura('Stato nell\'App Cantieri', esc(c.stato || '—') + '<span class="dato-sotto">lo cambia solo l\'App Cantieri</span>') +
       campoLettura('Creata il', esc(AC.data(c.created_at))) +
       '</div>'
-    // Il posto del riquadro: resta vuoto finché il database non risponde, e vuoto per sempre per chi non è titolare o senza CONT_104.
-    if (eTitolare()) h += '<div id="cm-conto"></div>'
+    // Il posto del riquadro: resta vuoto finché il database non risponde. Titolare: tutto (vuoto senza CONT_104). Responsabile: solo IBAN e banca.
+    if (eTitolare() || eResponsabile()) h += '<div id="cm-conto"></div>'
     h += '<div id="cm-foto-info"></div>'
     h += htmlFine(c)
     pane.innerHTML = h
     controllaFoto(c, function () { var x = el('cm-foto-info'); if (x) x.innerHTML = infoFoto(c) })
     CONTO.dati = null; CONTO.form = false
-    if (eTitolare()) caricaConto(c.id)
+    caricaConto(c.id)
   }
 
-  // ── Conto incassi (v11): solo il titolare ─────────────────────────────────
+  // ── Conto incassi (v11): il titolare sceglie, il responsabile vede IBAN e banca ──
   // Le funzioni sono della Contabilità (CONT_104). Qui si leggono e si chiamano, senza scrivere altro.
   var CONTO = { id: null, giro: 0, dati: null, form: false, messaggio: null, occupato: false }
   var PAROLE_TIPO = { principale: 'principale', uscite: 'uscite', cantiere: 'di cantiere' }
 
   function eTitolare() { return !!ST.utente && ST.utente.ruolo === 'titolare' }
+  function eResponsabile() { return !!ST.utente && ST.utente.ruolo === 'responsabile' }
   // CONT_104 non c'è sul database: funzione (PGRST202, 42883) o tabella (PGRST205, 42P01) assente.
   function rubricaAssente(e) { return /^(PGRST202|PGRST205|42883|42P01)$/.test(String(e && e.codice || '')) }
   function testoErrore(e) { return (e && e.originale && e.originale.message) || (e && e.message) || String(e) }
@@ -251,6 +252,7 @@ var CM = (function () {
   function nomeCommessa(c) { return (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c) }
 
   async function caricaConto(id) {
+    if (eResponsabile()) return caricaContoResp(id)
     if (!eTitolare()) return
     var g = ++CONTO.giro, dati
     try {
@@ -279,6 +281,34 @@ var CM = (function () {
     disegnaConto()
   }
   function titoloConto() { return '<h3 class="blocco-titolo"><span aria-hidden="true">🏦</span><span>Conto incassi</span></h3>' }
+
+  // Responsabile (Umberto, 5.11 e 9.11): IBAN e banca del conto della commessa, solo dalla funzione tm_conta_iban_per_stampa.
+  // La funzione non dà mai il nome del conto a chi non è titolare e scrive ogni lettura nel registro (lo legge il titolare).
+  // Niente nome, niente scelta, niente storico. Errore o conto mancante: sempre a parole, mai un riquadro vuoto.
+  async function caricaContoResp(id) {
+    var g = ++CONTO.giro, ib = null, errore = null
+    try { ib = await ibanPerStampa({ id: id }) }
+    catch (e) {
+      if (e.sessioneAssente) return APP.sessioneScaduta()
+      errore = e
+    }
+    if (g !== CONTO.giro) return
+    var box = el('cm-conto')
+    if (!box) return
+    CONTO.id = id
+    var h = '<div class="blocco" id="cm-conto-blocco">' + titoloConto()
+    if (errore) {
+      h += AC.avviso('err', '<strong>Non riesco a leggere l\'IBAN.</strong> ' + esc(testoErrore(errore)) +
+        '<div class="azioni-riga"><button type="button" class="btn btn-secondario btn-piccolo" data-azione="conto-riprova">Riprova</button></div>')
+    } else if (ib.iban) {
+      h += (ib.banca ? campoLettura('Banca', '<span id="cm-conto-banca">' + esc(ib.banca) + '</span>') : '') +
+        campoLettura('IBAN', '<span class="cm-iban" id="cm-conto-iban">' + esc(ibanLeggibile(ib.iban)) + '</span>') +
+        '<p class="nota" id="cm-conto-nota">Il conto lo sceglie il titolare. Ogni lettura dell\'IBAN resta scritta nel registro.</p>'
+    } else {
+      h += AC.avviso(ib.avviso ? 'warn' : 'info', ib.schermo)
+    }
+    box.innerHTML = h + '</div>'
+  }
 
   function contoPrincipale() { return CONTO.dati.conti.filter(function (k) { return k.tipo === 'principale' })[0] || null }
   // Su quale altra commessa è adesso questo conto (solo i conti di cantiere si spostano da soli).
@@ -408,16 +438,22 @@ var CM = (function () {
     manca: 'IBAN: manca il conto principale nella Rubrica dei conti',
     nonLetto: 'IBAN: non stampato, non è stato possibile leggerlo'
   }
+  // Le stesse cose dette a schermo, nel riquadro del responsabile.
+  var SCHERMO_IBAN = {
+    assente: 'La Rubrica dei conti (Contabilità) non è ancora attiva: per ora niente IBAN, nemmeno sul foglio.',
+    manca: '<strong>Nessun conto.</strong> Nella Rubrica dei conti (Contabilità) manca il conto principale: la stampa uscirà senza IBAN.'
+  }
   // Titolare e responsabile stampano la scheda con l'IBAN (Umberto, 5.11.2026). La funzione del database scrive ogni lettura nel registro.
+  // Torna IBAN e banca; il nome del conto non si usa (al responsabile la funzione non lo dà).
   async function ibanPerStampa(c) {
     try {
       var r = await AD.rpc('tm_conta_iban_per_stampa', { p_tipo: 'commessa', p_id: c.id })
       var riga = r && r[0]
-      return riga && riga.iban ? { iban: riga.iban } : { testo: TESTO_IBAN.manca, avviso: true }
+      return riga && riga.iban ? { iban: riga.iban, banca: riga.banca || '' } : { testo: TESTO_IBAN.manca, schermo: SCHERMO_IBAN.manca, avviso: true }
     } catch (e) {
       if (e.sessioneAssente) throw e
-      if (rubricaAssente(e)) return { testo: TESTO_IBAN.assente }
-      if (e.codice === 'P0002') return { testo: TESTO_IBAN.manca, avviso: true }
+      if (rubricaAssente(e)) return { testo: TESTO_IBAN.assente, schermo: SCHERMO_IBAN.assente }
+      if (e.codice === 'P0002') return { testo: TESTO_IBAN.manca, schermo: SCHERMO_IBAN.manca, avviso: true }
       throw e
     }
   }
@@ -447,7 +483,7 @@ var CM = (function () {
     }
     h += '<h2>Date</h2><div class="sf-gruppo">' + rigaFoglio('Creata il', AC.data(c.created_at)) + rigaFoglio('Stampata il', AC.data(AC.oggiIso())) + '</div>'
     h += ib.iban
-      ? '<h2>Pagamenti</h2><div class="sf-gruppo"><div class="sf-riga"><div class="sf-etichetta">IBAN</div><div class="sf-valore sf-iban" id="sf-iban">' + esc(ibanLeggibile(ib.iban)) + '</div></div></div>'
+      ? '<h2>Pagamenti</h2><div class="sf-gruppo">' + rigaFoglio('Banca', ib.banca) + '<div class="sf-riga"><div class="sf-etichetta">IBAN</div><div class="sf-valore sf-iban" id="sf-iban">' + esc(ibanLeggibile(ib.iban)) + '</div></div></div>'
       : '<h2>Pagamenti</h2><div class="sf-gruppo"><p class="sf-nota" id="sf-iban-testo">' + esc(ib.testo) + '</p></div>'
     return h
   }
@@ -937,9 +973,10 @@ var CM = (function () {
     if (a === 'archivia') { var ca = perId(aperto); if (ca) apriArchivia(ca); return }
     if (a === 'cancella') { var cc = perId(aperto); if (cc) apriCancella(cc); return }
     if (a === 'stampa' || a === 'stampa-senza-iban') { var cs = perId(aperto); if (cs) stampa(cs, a === 'stampa-senza-iban'); return }
-    if (a === 'conto-cambia') { CONTO.form = true; disegnaConto(); return }
-    if (a === 'conto-annulla') { CONTO.form = false; disegnaConto(); return }
-    if (a === 'conto-salva') { salvaConto(); return }
+    // Cambiare il conto: solo il titolare (il database lo rifiuta comunque agli altri).
+    if (a === 'conto-cambia') { if (eTitolare()) { CONTO.form = true; disegnaConto() } return }
+    if (a === 'conto-annulla') { if (eTitolare()) { CONTO.form = false; disegnaConto() } return }
+    if (a === 'conto-salva') { if (eTitolare()) salvaConto(); return }
     if (a === 'conto-riprova') { if (aperto) caricaConto(aperto); return }
     if (a === 'nuovo-interno') { location.hash = '#nuovo-interno'; return }
     if (a === 'modifica') { location.hash = '#commessa/' + t.dataset.id + '/modifica'; return }
