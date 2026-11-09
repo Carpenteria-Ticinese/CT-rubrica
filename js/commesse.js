@@ -252,7 +252,7 @@ var CM = (function () {
   function nomeCommessa(c) { return (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c) }
 
   async function caricaConto(id) {
-    if (eResponsabile()) return caricaContoResp(id)
+    if (eResponsabile()) return disegnaTastoIban(id)
     if (!eTitolare()) return
     var g = ++CONTO.giro, dati
     try {
@@ -284,8 +284,20 @@ var CM = (function () {
 
   // Responsabile (Umberto, 5.11 e 9.11): IBAN e banca del conto della commessa, solo dalla funzione tm_conta_iban_per_stampa.
   // La funzione non dà mai il nome del conto a chi non è titolare e scrive ogni lettura nel registro (lo legge il titolare).
+  // 11.2 (Umberto, 9.11): aprire la scheda NON chiama la funzione; il registro segna solo «Mostra IBAN» e la stampa.
   // Niente nome, niente scelta, niente storico. Errore o conto mancante: sempre a parole, mai un riquadro vuoto.
+  function disegnaTastoIban(id) {
+    ++CONTO.giro
+    CONTO.id = id
+    var box = el('cm-conto')
+    if (!box) return
+    box.innerHTML = '<div class="blocco" id="cm-conto-blocco">' + titoloConto() +
+      '<p class="nota" id="cm-conto-nota">L\'IBAN si vede solo quando lo chiedi: ogni lettura resta scritta nel registro.</p>' +
+      '<div class="azioni-riga"><button type="button" class="btn btn-secondario" id="cm-conto-mostra" data-azione="conto-mostra"><span aria-hidden="true">👁️</span><span>Mostra IBAN</span></button></div></div>'
+  }
   async function caricaContoResp(id) {
+    var b = el('cm-conto-mostra')
+    if (b) { if (b.disabled) return; b.disabled = true; b.lastChild.textContent = 'Leggo l\'IBAN…' }
     var g = ++CONTO.giro, ib = null, errore = null
     try { ib = await ibanPerStampa({ id: id }) }
     catch (e) {
@@ -977,7 +989,9 @@ var CM = (function () {
     if (a === 'conto-cambia') { if (eTitolare()) { CONTO.form = true; disegnaConto() } return }
     if (a === 'conto-annulla') { if (eTitolare()) { CONTO.form = false; disegnaConto() } return }
     if (a === 'conto-salva') { if (eTitolare()) salvaConto(); return }
-    if (a === 'conto-riprova') { if (aperto) caricaConto(aperto); return }
+    // Responsabile: «Mostra IBAN» e il suo Riprova sono le sole letture dal riquadro (una riga nel registro ciascuna).
+    if (a === 'conto-mostra') { if (aperto && eResponsabile()) caricaContoResp(aperto); return }
+    if (a === 'conto-riprova') { if (aperto) { if (eResponsabile()) caricaContoResp(aperto); else caricaConto(aperto) } return }
     if (a === 'nuovo-interno') { location.hash = '#nuovo-interno'; return }
     if (a === 'modifica') { location.hash = '#commessa/' + t.dataset.id + '/modifica'; return }
     if (a === 'cliente-cambia' || a === 'cliente-togli') {
