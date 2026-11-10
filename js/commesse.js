@@ -26,21 +26,38 @@ var CM = (function () {
   'use strict'
   var esc = AC.esc, ico = AC.ico, el = AC.el
 
-  var STATI = ['Da fare', 'Inviata', 'In corso', 'Persa', 'Conclusa']
-  var CLASSE_STATO = { 'Da fare': 'st-dafare', 'Inviata': 'st-inviata', 'In corso': 'st-incorso', 'Persa': 'st-persa', 'Conclusa': 'st-conclusa' }
-  // 11.3 (Umberto 9.11.2026): SOLO le parole a schermo e in stampa. Nel database i valori restano quelli di sempre.
-  // «Da fare» non diceva se era l'offerta o il lavoro. «Lavoro da iniziare» non ha ancora un valore nel database: non c'è.
-  var PAROLA_STATO = {
-    'Da fare': ['📝', 'Offerta da fare'], 'Inviata': ['📤', 'Offerta inviata'], 'In corso': ['🔨', 'Lavoro in corso'],
-    'Persa': ['❌', 'Persa'], 'Conclusa': ['🏁', 'Lavoro finito']
-  }
-  function parolaStato(s) { var p = PAROLA_STATO[s]; return p ? p[0] + ' ' + p[1] : String(s || '') }
-  function htmlStato(s) { var p = PAROLA_STATO[s]; return p ? '<span aria-hidden="true">' + p[0] + '</span> ' + esc(p[1]) : esc(s) }
-  var FILTRI = [
-    { k: 'aperte', n: 'Aperte' }, { k: 'Da fare', n: 'Offerte da fare' }, { k: 'Inviata', n: 'Offerte inviate' },
-    { k: 'In corso', n: 'Lavori in corso' }, { k: 'Persa', n: 'Perse' }, { k: 'Conclusa', n: 'Lavori finiti' },
-    { k: 'senza', n: 'Senza stato' }, { k: 'tutte', n: 'Tutte' }
+  // ── Stati della commessa: UNA lista sola, in quest'ordine (Persa sempre ultima) ──
+  // 11.5 (ANAG_12, Umberto 10.11.2026): nel database le parole sono queste 7. Prima di ANAG_12 il database ha ancora le
+  // parole vecchie («vecchia»): l'app le capisce e, finché ANAG_12 non c'è, scrive quelle (Rimandata e Lavoro da iniziare
+  // allora non si possono scegliere). «nota»: la nota si chiama «Motivo». «richiamo»: data per richiamare il cliente.
+  // «periodo»: il periodo previsto si mostra sempre nel modulo (per gli altri stati solo se è già scritto).
+  var STATI = [
+    { v: 'Offerta da fare',    i: '📝', cls: 'st-dafare',     vecchia: 'Da fare',  filtro: 'Offerte da fare',    aperta: true,  periodo: true },
+    { v: 'Offerta inviata',    i: '📤', cls: 'st-inviata',    vecchia: 'Inviata',  filtro: 'Offerte inviate',    aperta: true,  periodo: true },
+    { v: 'Rimandata',          i: '⏸️', cls: 'st-rimandata',  vecchia: null,       filtro: 'Rimandate',          aperta: true,  periodo: true, motivo: true, richiamo: true },
+    { v: 'Lavoro da iniziare', i: '✅', cls: 'st-dainiziare', vecchia: null,       filtro: 'Lavori da iniziare', aperta: true,  periodo: true },
+    { v: 'Lavoro in corso',    i: '🔨', cls: 'st-incorso',    vecchia: 'In corso', filtro: 'Lavori in corso',    aperta: true },
+    { v: 'Lavoro finito',      i: '🏁', cls: 'st-conclusa',   vecchia: 'Conclusa', filtro: 'Lavori finiti',      aperta: false },
+    { v: 'Persa',              i: '❌', cls: 'st-persa',      vecchia: 'Persa',    filtro: 'Perse',              aperta: false, motivo: true }
   ]
+  function normaleStato(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase() }
+  // Valore del database (parola nuova o vecchia, anche «Da iniziare») → voce della lista, oppure null (vuoto o sconosciuto).
+  function statoDi(valore) {
+    var n = normaleStato(valore)
+    if (!n) return null
+    if (n === 'da iniziare') n = 'lavoro da iniziare'
+    return STATI.filter(function (s) { return normaleStato(s.v) === n || (s.vecchia && normaleStato(s.vecchia) === n) })[0] || null
+  }
+  function chiaveStato(c) { var s = statoDi(c && c.stato_commessa); return s ? s.v : null }
+  function parolaStato(valore) { var s = statoDi(valore); return s ? s.i + ' ' + s.v : (valore ? '❔ ' + valore : '') }
+  function htmlStato(valore) { var s = statoDi(valore); return s ? '<span aria-hidden="true">' + s.i + '</span> ' + esc(s.v) : '<span aria-hidden="true">❔</span> ' + esc(valore) }
+  // Stati che si possono scegliere: senza ANAG_12 solo quelli che hanno una parola vecchia.
+  function statiDaScegliere() { return STATI.filter(function (s) { return ST.stati12 || s.vecchia }) }
+  // La parola da scrivere nel database (solo senza ANAG_12; con ANAG_12 si passa dalla funzione).
+  function valoreDb(v) { var s = statoDi(v); return !s ? null : ST.stati12 ? s.v : s.vecchia }
+  var FILTRI = [{ k: 'aperte', n: 'Aperte' }].concat(STATI.map(function (s) { return { k: s.v, n: s.filtro, s: s } }),
+    [{ k: 'senza', n: 'Senza stato' }, { k: 'tutte', n: 'Tutte' }])
+  var COL_STATO_12 = ',stato_nota,richiamo_il,periodo_previsto,mese_inizio_previsto'
   // codice_interno arriva con l'SQL ANAG_F2_03: se manca si legge senza (l'interno si riconosce dal tipo).
   var COL_CANTIERI_VECCHIE = 'id,nome,luogo,committente,stato,note,via,cap,citta,paese,numero_commessa,stato_commessa,tipo,cliente_id,created_at'
   var COL_CANTIERI = COL_CANTIERI_VECCHIE + ',codice_interno'
@@ -60,10 +77,11 @@ var CM = (function () {
   async function carica(forza) {
     if (ST.caricato && !forza) return
     var r = await Promise.all([
-      AD.leggiConRiserva('cantieri', COL_CANTIERI, COL_CANTIERI_VECCHIE),
+      leggiCantieri(),
       AD.leggi('tm_contatti', COL_CONTATTI)
     ])
-    ST.colCantieri = r[0].complete ? COL_CANTIERI : COL_CANTIERI_VECCHIE
+    ST.colCantieri = r[0].colonne
+    ST.stati12 = r[0].stati12
     r[0] = r[0].righe
     // Canarino: i due interni ci sono sempre. Zero righe = il database non dà i
     // dati a questo utente (o regole cambiate): niente elenchi vuoti che sembrano veri.
@@ -73,6 +91,14 @@ var CM = (function () {
     ST.cantieri = r[0]
     ST.contatti = r[1]
     ST.caricato = true
+  }
+  // 11.5: prima con le colonne di ANAG_12 (stato_nota, richiamo_il, periodo_previsto, mese_inizio_previsto).
+  // Se mancano (42703: ANAG_12 non ancora applicato) si legge come prima e si scrivono le parole vecchie.
+  async function leggiCantieri() {
+    try { return { righe: await AD.leggi('cantieri', COL_CANTIERI + COL_STATO_12), colonne: COL_CANTIERI + COL_STATO_12, stati12: true } }
+    catch (e) { if (!AD.colonnaMancante(e)) throw e }
+    var r2 = await AD.leggiConRiserva('cantieri', COL_CANTIERI, COL_CANTIERI_VECCHIE)
+    return { righe: r2.righe, colonne: r2.complete ? COL_CANTIERI : COL_CANTIERI_VECCHIE, stati12: false }
   }
   function scarta() { ST.form = null; ST.salvaComunque = false }
   function svuota() { ST.cantieri = []; ST.contatti = []; ST.caricato = false; ST.foto = {}; ST.form = null; ST.messaggio = null; CONTO.dati = null; CONTO.form = false; CONTO.giro++; puliziaStampa() }
@@ -99,11 +125,37 @@ var CM = (function () {
     return String(b.created_at || '').localeCompare(String(a.created_at || ''))
   }
   function passaFiltro(c, f) {
-    var s = c.stato_commessa || null
+    var s = statoDi(c.stato_commessa)
     if (f === 'tutte') return true
-    if (f === 'senza') return !s
-    if (f === 'aperte') return !s || s === 'Da fare' || s === 'Inviata' || s === 'In corso'
-    return s === f
+    if (f === 'senza') return !c.stato_commessa
+    if (f === 'aperte') return !s || s.aperta   // vuoto o sconosciuto: fra le aperte (meglio visto in più che nascosto)
+    return !!s && s.v === f
+  }
+  // Rimandate: prima chi va richiamato prima. Lavori da iniziare: per mese di inizio. Senza data in fondo.
+  function ordinaPerData(col) {
+    return function (a, b) {
+      var x = a[col] || '', y = b[col] || ''
+      if (x && y && x !== y) return x < y ? -1 : 1
+      if (x && !y) return -1
+      if (!x && y) return 1
+      return ordinaCommesse(a, b)
+    }
+  }
+  function dataCorta(iso) { return iso ? AC.data(iso) : '' }
+  function meseParole(iso) {
+    if (!iso) return ''
+    var m = String(iso).match(/^(\d{4})-(\d{2})/)
+    var MESI = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre']
+    return m ? MESI[Number(m[2]) - 1] + ' ' + m[1] : String(iso)
+  }
+  function richiamoPassato(c) { return !!c.richiamo_il && c.richiamo_il <= AC.oggiIso() }
+  // La riga piccola sotto il nome, nell'elenco: quando richiamare, quando si pensa di partire.
+  function sottoStato(c) {
+    var s = statoDi(c.stato_commessa)
+    if (!s) return ''
+    if (s.richiamo && c.richiamo_il) return (richiamoPassato(c) ? '📞 Da richiamare dal ' : '📞 Richiamare il ') + dataCorta(c.richiamo_il)
+    if (s.periodo && (c.periodo_previsto || c.mese_inizio_previsto)) return '🗓️ ' + (c.periodo_previsto || meseParole(c.mese_inizio_previsto))
+    return ''
   }
   function passaRicerca(c) {
     if (!ST.cerca) return true
@@ -114,17 +166,19 @@ var CM = (function () {
   // ── Pezzi di pagina ────────────────────────────────────────────────────────
   function badgeStato(c) {
     if (eInterno(c)) return '<span class="badge st-interno">Interno</span>'
-    var s = c.stato_commessa
-    return s ? '<span class="badge ' + (CLASSE_STATO[s] || '') + '">' + htmlStato(s) + '</span>'
-             : '<span class="badge st-senza">Senza stato</span>'
+    var s = statoDi(c.stato_commessa)
+    if (!c.stato_commessa) return '<span class="badge st-senza">Senza stato</span>'
+    return '<span class="badge ' + (s ? s.cls : 'st-senza') + '">' + htmlStato(c.stato_commessa) + '</span>'
   }
   function rigaCommessa(c, scelta) {
     var cli = nomeCliente(c)
     var luogo = c.luogo || c.citta || ''
+    var extra = eInterno(c) ? '' : sottoStato(c)
     return '<button type="button" class="riga' + (scelta ? ' riga-scelta' : '') + '" data-apri="' + esc(c.id) + '">' +
              '<span class="riga-numero">' + (eInterno(c) ? ico('interni') : esc(c.numero_commessa || '—')) + '</span>' +
              '<span class="riga-testo"><span class="riga-nome">' + esc(nomeMostrato(c)) + '</span>' +
                (cli || luogo ? '<span class="riga-sotto">' + esc([cli, luogo].filter(Boolean).join(' · ')) + '</span>' : '') +
+               (extra ? '<span class="riga-sotto riga-stato-extra' + (richiamoPassato(c) && statoDi(c.stato_commessa) && statoDi(c.stato_commessa).richiamo ? ' richiamo-passato' : '') + '">' + esc(extra) + '</span>' : '') +
              '</span>' + badgeStato(c) +
            '</button>'
   }
@@ -136,7 +190,10 @@ var CM = (function () {
     var interni = ST.cantieri.filter(eInterno).sort(function (a, b) { return nomeMostrato(a).localeCompare(nomeMostrato(b), 'it') })
     var conta = {}
     FILTRI.forEach(function (f) { conta[f.k] = commesse.filter(function (c) { return passaFiltro(c, f.k) }).length })
-    var mostrate = commesse.filter(function (c) { return passaFiltro(c, ST.filtro) && passaRicerca(c) }).sort(ordinaCommesse)
+    var mostrate = commesse.filter(function (c) { return passaFiltro(c, ST.filtro) && passaRicerca(c) })
+      .sort(ST.filtro === 'Rimandata' ? ordinaPerData('richiamo_il') : ST.filtro === 'Lavoro da iniziare' ? ordinaPerData('mese_inizio_previsto') : ordinaCommesse)
+    // Senza ANAG_12 i due stati nuovi non esistono ancora: i loro filtri non si mostrano.
+    var filtri = FILTRI.filter(function (f) { return !f.s || ST.stati12 || f.s.vecchia || conta[f.k] })
 
     var h = '<div class="barra-elenco">' +
         '<label class="cerca">' + ico('cerca') + '<span class="nascosto">Cerca</span>' +
@@ -144,10 +201,10 @@ var CM = (function () {
         '<button type="button" class="btn btn-primario" data-azione="nuova">' + ico('piu') + '<span>Nuova commessa</span></button>' +
       '</div>' +
       '<div class="filtri" role="group" aria-label="Filtra per stato">' +
-        FILTRI.map(function (f) {
-          var p = PAROLA_STATO[f.k]
+        filtri.map(function (f) {
+          var p = f.s
           return '<button type="button" class="filtro' + (ST.filtro === f.k ? ' filtro-attivo' : '') + '" data-filtro="' + esc(f.k) + '" aria-pressed="' + (ST.filtro === f.k) + '">' +
-                 (p ? '<span class="pallino ' + CLASSE_STATO[f.k] + '" aria-hidden="true"></span><span aria-hidden="true">' + p[0] + '</span> ' : '') +
+                 (p ? '<span class="pallino ' + p.cls + '" aria-hidden="true"></span><span aria-hidden="true">' + p.i + '</span> ' : '') +
                  esc(f.n) + ' <span class="filtro-n">' + conta[f.k] + '</span></button>'
         }).join('') +
       '</div>'
@@ -178,6 +235,18 @@ var CM = (function () {
   function campoLettura(etichetta, valoreHtml) {
     return '<div class="dato"><div class="dato-etichetta">' + esc(etichetta) + '</div><div class="dato-valore">' + (valoreHtml || '<span class="vuoto-inline">—</span>') + '</div></div>'
   }
+  // 11.5: motivo / nota, data di richiamo, periodo e mese di inizio (solo se scritti). Senza ANAG_12 non ci sono.
+  function datiStatoLettura(c) {
+    var s = statoDi(c.stato_commessa), h = ''
+    if (c.stato_nota) h += campoLettura(s && s.motivo ? 'Motivo' : 'Nota sullo stato', esc(c.stato_nota).replace(/\n/g, '<br>'))
+    if (c.richiamo_il) {
+      h += campoLettura('Richiamare il', '<span class="' + (richiamoPassato(c) ? 'richiamo-passato' : '') + '">📞 ' + esc(dataCorta(c.richiamo_il)) + '</span>' +
+        (richiamoPassato(c) ? '<span class="dato-sotto">la data è arrivata: richiama il cliente</span>' : ''))
+    }
+    if (c.periodo_previsto) h += campoLettura('Periodo previsto', esc(c.periodo_previsto))
+    if (c.mese_inizio_previsto) h += campoLettura('Mese di inizio', esc(meseParole(c.mese_inizio_previsto)))
+    return h
+  }
   function telLink(n) {
     var t = String(n || '').replace(/[^\d+]/g, '')
     return t ? '<a class="btn btn-secondario btn-piccolo" href="tel:' + esc(t) + '">' + ico('telefono') + '<span>Chiama</span></a>' : ''
@@ -193,15 +262,11 @@ var CM = (function () {
     if (ST.messaggio) { h += AC.avviso(ST.messaggio.tipo, ST.messaggio.html); ST.messaggio = null }
     h += '<div id="cm-stampa-msg"></div>'
 
-    // Due padroni: «In corso» qui, ma l'App Cantieri non l'ha ancora messa al lavoro
-    if (c.stato_commessa === 'In corso' && c.stato === 'Completato') {
-      h += AC.avviso('warn', '<strong>Nell\'App Cantieri non è ancora attiva.</strong> Aprila nell\'App Cantieri e mettila «Attivo»: è lì che si decide quando partono i lavori.')
-    }
-
+    // 11.5 (Umberto 10.11.2026): lo stato è uno solo. La colonna vecchia cantieri.stato (Attivo, In pausa, Completato)
+    // non si mostra più: con ANAG_12 la calcola il database dallo stato della commessa.
     if (eInterno(c)) {
       h += '<div class="blocco">' +
         campoLettura('Tipo', 'Interno: ore e spese della ditta') +
-        campoLettura('Stato nell\'App Cantieri', esc(c.stato || '—')) +
         '</div>' +
         AC.avviso('info', 'Gli interni non hanno numero, stato commessa né cliente. Il nome non si cambia da qui.' +
           (c.codice_interno === 'ditta' && c.nome !== 'Lavori per la ditta' ? ' Nel database si chiama ancora «' + esc(c.nome) + '» (cambia con l\'SQL ANAG_F2_05).' : ''))
@@ -229,13 +294,13 @@ var CM = (function () {
     h += '<div class="blocco">' +
       campoLettura('Numero commessa', esc(c.numero_commessa || '—')) +
       campoLettura('Stato commessa', c.stato_commessa ? htmlStato(c.stato_commessa) : '<span class="vuoto-inline">non ancora scelto</span>') +
+      datiStatoLettura(c) +
       campoLettura('Cliente', clienteHtml) +
       campoLettura('Località', esc(c.luogo || '')) +
       campoLettura('Indirizzo', esc(indirizzo)) +
       campoLettura('Note', c.note ? esc(c.note).replace(/\n/g, '<br>') : '') +
       '</div>' +
       '<div class="blocco blocco-tenue">' +
-      campoLettura('Stato nell\'App Cantieri', esc(c.stato || '—') + '<span class="dato-sotto">lo cambia solo l\'App Cantieri</span>') +
       campoLettura('Creata il', esc(AC.data(c.created_at))) +
       '</div>'
     // Il posto del riquadro: resta vuoto finché il database non risponde. Titolare: tutto (vuoto senza CONT_104). Responsabile: solo IBAN e banca.
@@ -489,7 +554,8 @@ var CM = (function () {
     var h = '<div class="sf-testa"><div class="sf-ditta">Carpenteria Ticinese Sagl</div><h1>Scheda commessa</h1></div>'
     h += '<div class="sf-gruppo">' +
       rigaFoglio('Numero commessa', c.numero_commessa) + rigaFoglio('Nome', nomeMostrato(c)) + rigaFoglio('Codice', c.codice_interno) +
-      rigaFoglio('Tipo', eInterno(c) ? 'Interno' : 'Commessa') + rigaFoglio('Stato', c.stato_commessa ? parolaStato(c.stato_commessa) : 'non ancora scelto') + '</div>'
+      rigaFoglio('Tipo', eInterno(c) ? 'Interno' : 'Commessa') + rigaFoglio('Stato', c.stato_commessa ? parolaStato(c.stato_commessa) : 'non ancora scelto') +
+      rigaFoglio('Periodo previsto', c.periodo_previsto || (c.mese_inizio_previsto ? meseParole(c.mese_inizio_previsto) : '')) + '</div>'
     h += '<h2>Cliente</h2><div class="sf-gruppo">' +
       rigaFoglio('Nome', k ? AC.nomeContatto(k) : c.committente || 'non indicato') +
       (k ? rigaFoglio('Referente', k.referente) + rigaFoglio('Indirizzo', [k.indirizzo, cittaK].filter(Boolean).join(', ')) +
@@ -548,7 +614,7 @@ var CM = (function () {
   // ── Archivia / Cancella (v7) ──────────────────────────────────────────────
   // Interni: riconosciuti da tipo e codice_interno, MAI dal nome. Senza la colonna codice_interno non si rischia.
   function internoProtetto(c) { return eInterno(c) && (c.codice_interno || ST.colCantieri !== COL_CANTIERI) }
-  function archiviata(c) { return c.stato_commessa === 'Conclusa' || c.stato_commessa === 'Persa' }
+  function archiviata(c) { var s = chiaveStato(c); return s === 'Lavoro finito' || s === 'Persa' }
   function htmlFine(c) {
     var tit = ST.utente && ST.utente.ruolo === 'titolare', az = '', h = ''
     if (!eInterno(c)) {
@@ -566,10 +632,12 @@ var CM = (function () {
     return '<div class="blocco blocco-tenue" id="cm-fine"><h3 class="blocco-titolo">' + ico('lucchetto') + 'Archivia o cancella</h3>' + h +
       (az ? '<div class="azioni-riga">' + az + '</div>' : '') + '</div>'
   }
-  // Scrive solo stato_commessa (il suo). cantieri.stato è dell'App Cantieri: se è ancora Attivo lo si dice.
+  // Scrive solo lo stato della commessa. Con ANAG_12 passa dalla funzione anag_commessa_cambia_stato (lo storico lo scrive
+  // il database); senza, scrive la parola vecchia come prima. La colonna vecchia «stato» non si tocca.
   function apriArchivia(c) {
     var corpo = '<p>Archiviare non perde niente: sparisce dalle commesse aperte, i dati restano e si ritrova con i filtri «Lavori finiti» e «Perse».</p>' +
-      (c.stato === 'Attivo' ? AC.avviso('warn', 'Nell\'App Cantieri resta «Attivo» finché non la chiudi lì: lo stato dei lavori lo decide quell\'app.') : '') +
+      (ST.stati12 ? '<div class="campo"><label for="cx-motivo">Motivo, se è persa <span class="sezione-nota">(facoltativo)</span></label>' +
+        '<textarea id="cx-motivo" rows="2" maxlength="500" placeholder="es. prezzo troppo alto, ha scelto un\'altra ditta"></textarea></div>' : '') +
       '<div id="cx-archivia-msg"></div><div class="vela-azioni">' +
       CX.bottone('conclusa', '🏁 Lavoro finito', 'btn-primario', 'ok', 'cx-primo') +
       CX.bottone('persa', '❌ Persa: non l\'abbiamo presa', 'btn-primario', 'chiudi') +
@@ -577,9 +645,10 @@ var CM = (function () {
     function salva(stato) {
       return async function () {
         try {
-          var s = await AD.aggiorna('cantieri', c.id, { stato_commessa: stato }, ST.colCantieri)
+          var m = el('cx-motivo')
+          var s = await scriviStato(c, { stato: stato, nota: stato === 'Persa' && m ? m.value : null })
           ST.cantieri = ST.cantieri.map(function (x) { return x.id === s.id ? s : x })
-          ST.messaggio = { tipo: 'ok', html: 'Archiviata: stato <strong>' + esc(stato) + '</strong>. I dati restano tutti.' }
+          ST.messaggio = { tipo: 'ok', html: 'Archiviata: stato <strong>' + esc(parolaStato(stato)) + '</strong>. I dati restano tutti.' }
           await CX.chiudi()
           disegnaElenco(aperto); disegnaScheda(c.id)
         } catch (e) {
@@ -588,7 +657,24 @@ var CM = (function () {
         }
       }
     }
-    CX.schermo('Archivia ' + (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c), corpo, { conclusa: salva('Conclusa'), persa: salva('Persa') })
+    CX.schermo('Archivia ' + (c.numero_commessa ? c.numero_commessa + ' · ' : '') + nomeMostrato(c), corpo, { conclusa: salva('Lavoro finito'), persa: salva('Persa') })
+  }
+  // Cambia lo stato (e con ANAG_12 anche nota, richiamo, periodo, mese) e torna la riga com'è ora nel database.
+  // x = { stato, nota, richiamo, periodo, mese } con i nomi della lista (parole nuove).
+  async function scriviStato(c, x) {
+    if (!ST.stati12) {
+      var vecchia = valoreDb(x.stato)
+      if (!vecchia) throw new Error('lo stato «' + x.stato + '» arriva con l\'aggiornamento del database (ANAG_12), che non è ancora fatto.')
+      return await AD.aggiorna('cantieri', c.id, { stato_commessa: vecchia }, ST.colCantieri)
+    }
+    var r = await AD.rpc('anag_commessa_cambia_stato', {
+      p_cantiere: c.id, p_stato: x.stato, p_nota: vuotoNull(x.nota), p_richiamo: x.richiamo || null,
+      p_periodo: vuotoNull(x.periodo), p_mese_inizio: x.mese || null
+    })
+    if (!r || r.ok !== true) throw new Error('il database non ha confermato il cambio di stato. Ricarica la pagina e controlla.')
+    var righe = await AD.leggi('cantieri', ST.colCantieri, function (q) { return q.eq('id', c.id) })
+    if (righe.length !== 1) throw new Error('stato cambiato, ma il database non mi ridà la commessa (' + righe.length + ' righe). Ricarica la pagina.')
+    return righe[0]
   }
   function apriCancella(c) {
     if (internoProtetto(c)) return
@@ -645,11 +731,15 @@ var CM = (function () {
 
   // ── MODULO (nuova commessa / modifica / nuovo interno) ────────────────────
   function bozzaVuota(tipo) {
-    return { id: null, tipo: tipo, nome: '', cliente_id: null, stato_commessa: tipo === 'interno' ? null : 'Da fare',
+    return { id: null, tipo: tipo, nome: '', cliente_id: null, stato_commessa: tipo === 'interno' ? null : 'Offerta da fare',
+             stato_nota: '', richiamo_il: '', periodo_previsto: '', mese_inizio_previsto: '',
              luogo: '', via: '', cap: '', citta: '', paese: AC.PAESE_PREDEFINITO, note: '', committente: null }
   }
+  // Nel modulo lo stato è sempre la parola nuova (anche se nel database c'è ancora la vecchia). Sconosciuto: resta com'è.
   function bozzaDa(c) {
-    return { id: c.id, tipo: c.tipo, nome: c.nome || '', cliente_id: c.cliente_id || null, stato_commessa: c.stato_commessa || null,
+    return { id: c.id, tipo: c.tipo, nome: c.nome || '', cliente_id: c.cliente_id || null, stato_commessa: chiaveStato(c) || c.stato_commessa || null,
+             stato_nota: c.stato_nota || '', richiamo_il: c.richiamo_il || '', periodo_previsto: c.periodo_previsto || '',
+             mese_inizio_previsto: c.mese_inizio_previsto ? String(c.mese_inizio_previsto).slice(0, 7) : '',
              luogo: c.luogo || '', via: c.via || '', cap: c.cap || '', citta: c.citta || '', paese: c.paese || AC.PAESE_PREDEFINITO,
              note: c.note || '', committente: c.committente || null }
   }
@@ -668,6 +758,34 @@ var CM = (function () {
     ;['nome', 'luogo', 'via', 'cap', 'citta', 'note'].forEach(function (k) { var x = el('cm-' + k); if (x && !x.readOnly) f[k] = x.value })
     var p = el('cm-paese'); if (p) f.paese = p.value
     var s = el('cm-stato'); if (s) f.stato_commessa = s.value || null
+    ;[['stato-nota', 'stato_nota'], ['richiamo', 'richiamo_il'], ['periodo', 'periodo_previsto'], ['mese', 'mese_inizio_previsto']].forEach(function (p) {
+      var x = el('cm-' + p[0]); if (x) f[p[1]] = x.value
+    })
+  }
+  // «2027-03» (campo mese), «03.2027», «3/2027» → '2027-03-01'. Vuoto → null. Altro → false (errore sul campo).
+  function meseDaModulo(t) {
+    t = String(t || '').trim()
+    if (!t) return null
+    var m = t.match(/^(\d{4})-(\d{1,2})(-\d{1,2})?$/) || null
+    if (m) return mese2(m[1], m[2])
+    m = t.match(/^(\d{1,2})[.\/](\d{4})$/)
+    return m ? mese2(m[2], m[1]) : false
+    function mese2(a, b) { var n = Number(b); return n >= 1 && n <= 12 ? a + '-' + String(n).padStart(2, '0') + '-01' : false }
+  }
+  // Quali campi dello stato si vedono nel modulo, per lo stato scelto (e sempre se c'è già scritto qualcosa).
+  function mostraCampiStato() {
+    var sel = el('cm-stato'); if (!sel || !ST.stati12) return
+    var s = statoDi(sel.value) || {}
+    var vis = function (id, si) { var x = el('campo-' + id); if (x) x.hidden = !si }
+    var pieno = function (id) { var x = el('cm-' + id); return !!(x && x.value) }
+    vis('richiamo', !!s.richiamo)
+    vis('periodo', !!s.periodo || pieno('periodo'))
+    vis('mese', !!s.periodo || pieno('mese'))
+    var lab = document.querySelector('label[for="cm-stato-nota"]')
+    if (lab) lab.textContent = s.motivo ? 'Motivo' : 'Nota sullo stato'
+    var aiuto = el('aiuto-stato-nota')
+    if (aiuto) aiuto.textContent = s.v === 'Rimandata' ? 'Perché è rimandata (es. «aspetta il mutuo», «attesa licenza edilizia»).'
+      : s.v === 'Persa' ? 'Perché non l\'abbiamo presa (es. «prezzo troppo alto»).' : 'Facoltativa (es. «attesa licenza edilizia»).'
   }
 
   function campo(id, etichetta, controllo, aiuto, obbligatorio) {
@@ -684,6 +802,7 @@ var CM = (function () {
     var pane = el('pane-dettaglio')
     var f = ST.form
     var interno = f.tipo === 'interno'
+    if (statoDi(f.stato_commessa)) f.stato_commessa = statoDi(f.stato_commessa).v   // bozza vecchia con «Da fare» → parola nuova
     var orig = f.id ? perId(f.id) : null
     var bloccato = orig ? nomeBloccato(orig) : false
     var titolo = interno ? 'Nuovo interno' : (f.id ? 'Modifica ' + (orig.numero_commessa || '') : 'Nuova commessa')
@@ -705,10 +824,24 @@ var CM = (function () {
     if (interno) {
       h += AC.avviso('info', 'Un interno non ha numero, stato commessa né cliente. Nell\'App Cantieri sarà visibile da subito.') + '</div>'
     } else {
-      // Stato commessa
+      // Stato commessa: le scelte vengono dalla lista unica, in ordine. Uno stato sconosciuto resta scelto, con ❔.
+      var scelte = statiDaScegliere()
+      var noto = scelte.some(function (s) { return s.v === f.stato_commessa })
       var opz = (f.stato_commessa ? '' : '<option value="" selected>— non ancora scelto —</option>') +
-        STATI.map(function (s) { return '<option value="' + esc(s) + '"' + (s === f.stato_commessa ? ' selected' : '') + '>' + esc(parolaStato(s)) + '</option>' }).join('')
-      h += campo('stato', 'Stato commessa', '<select id="cm-stato">' + opz + '</select>', 'Lo scrive solo Anagrafiche. Lo stato dei lavori lo decide l\'App Cantieri.')
+        (f.stato_commessa && !noto ? '<option value="' + esc(f.stato_commessa) + '" selected>' + esc(parolaStato(f.stato_commessa)) + '</option>' : '') +
+        scelte.map(function (s) { return '<option value="' + esc(s.v) + '"' + (s.v === f.stato_commessa ? ' selected' : '') + '>' + esc(s.i + ' ' + s.v) + '</option>' }).join('')
+      h += campo('stato', 'Stato commessa', '<select id="cm-stato">' + opz + '</select>',
+        ST.stati12 ? 'Lo stato è uno solo: vale per tutte le app (Cantieri, Calendario).' : 'Lo stato è uno solo: vale per tutte le app. «Rimandata» e «Lavoro da iniziare» arrivano con l\'aggiornamento del database.')
+      if (ST.stati12) {
+        h += '<div class="stato-extra">' +
+          '<div class="campo" id="campo-stato-nota"><label for="cm-stato-nota">Nota sullo stato</label>' +
+            '<textarea id="cm-stato-nota" rows="2" maxlength="500">' + esc(f.stato_nota) + '</textarea>' +
+            '<div class="campo-aiuto" id="aiuto-stato-nota"></div><div class="campo-errore" id="err-stato-nota" hidden></div></div>' +
+          campo('richiamo', 'Richiamare il', '<input id="cm-richiamo" type="date" value="' + esc(f.richiamo_il) + '">', 'Il giorno in cui richiamare il cliente.') +
+          campo('periodo', 'Periodo previsto', input('periodo', f.periodo_previsto, ' autocomplete="off" maxlength="200" placeholder="es. marzo 2027, dicembre o gennaio"'), 'A parole, come lo dice il cliente.') +
+          campo('mese', 'Mese di inizio (per ordinare)', '<input id="cm-mese" type="month" value="' + esc(f.mese_inizio_previsto) + '" placeholder="2027-03">', 'Serve a mettere in fila i lavori da iniziare.') +
+          '</div>'
+      }
       h += '</div>'
 
       // Cliente
@@ -736,6 +869,7 @@ var CM = (function () {
     pane.innerHTML = h
 
     el('cm-modulo').addEventListener('submit', function (ev) { ev.preventDefault(); salva() })
+    if (el('cm-stato')) { el('cm-stato').addEventListener('change', mostraCampiStato); mostraCampiStato() }
     if (!interno) collegaCliente()
     if (!interno && window.CAP) CAP.collega('cm-cap', 'cm-citta', 'cm-cap-aiuto', 'cm-paese')
     if (orig && !eInterno(orig) && (!ST.foto[orig.id] || ST.foto[orig.id].stato === 'controllo')) {
@@ -918,8 +1052,26 @@ var CM = (function () {
       }
     }
 
+    // 11.5: i campi dello stato (con ANAG_12). Il mese si salva sempre al giorno 1.
+    var statoX = null
+    if (f.tipo !== 'interno') {
+      var mese = ST.stati12 ? meseDaModulo(f.mese_inizio_previsto) : null
+      if (mese === false) return erroreCampo('cm-mese', 'Scrivi il mese così: 03.2027 (mese e anno).')
+      var sx = statoDi(f.stato_commessa)
+      statoX = { stato: f.stato_commessa, nota: f.stato_nota, richiamo: sx && sx.richiamo ? f.richiamo_il || null : null, periodo: f.periodo_previsto, mese: mese }
+      if (ST.stati12 && f.stato_commessa && !sx) return erroreCampo('cm-stato', 'Questo stato non c\'è più: scegline uno dall\'elenco.')
+    }
+    function statoCambiato(o) {
+      if (!statoX || !statoX.stato) return false
+      if (!ST.stati12) return statoX.stato !== (chiaveStato(o) || o.stato_commessa || null)
+      return statoX.stato !== (chiaveStato(o) || o.stato_commessa || null) || (vuotoNull(statoX.nota) || null) !== (o.stato_nota || null) ||
+        (statoX.richiamo || null) !== (o.richiamo_il || null) || (vuotoNull(statoX.periodo) || null) !== (o.periodo_previsto || null) ||
+        (statoX.mese || null) !== (o.mese_inizio_previsto ? String(o.mese_inizio_previsto).slice(0, 10) : null)
+    }
+
     var bottone = el('cm-salva')
     bottone.disabled = true
+    var statoFatto = false
     try {
       var k = f.cliente_id ? contatto(f.cliente_id) : null
       var salvata
@@ -927,9 +1079,15 @@ var CM = (function () {
         var riga = { nome: nome, tipo: f.tipo }
         if (f.tipo === 'interno') {
           riga.stato = 'Attivo'   // visibile nell'App Cantieri da subito
+        } else if (ST.stati12) {
+          // Con ANAG_12 la colonna vecchia «stato» la calcola il database dallo stato della commessa: non si manda.
+          riga.stato_commessa = statoX.stato || 'Offerta da fare'
+          riga.stato_nota = vuotoNull(statoX.nota); riga.richiamo_il = statoX.richiamo; riga.periodo_previsto = vuotoNull(statoX.periodo); riga.mese_inizio_previsto = statoX.mese
         } else {
-          riga.stato = 'Completato'   // regola di passaggio: l'App Cantieri di oggi non la mostra fra i lavori
-          riga.stato_commessa = f.stato_commessa || 'Da fare'
+          riga.stato = 'Completato'   // regola di passaggio (prima di ANAG_12): l'App Cantieri vecchia non la mostra fra i lavori
+          riga.stato_commessa = valoreDb(statoX.stato) || 'Da fare'
+        }
+        if (f.tipo !== 'interno') {
           riga.cliente_id = f.cliente_id || null
           riga.committente = k ? AC.nomeContatto(k) : null
           riga.luogo = vuotoNull(f.luogo); riga.via = vuotoNull(f.via); riga.cap = vuotoNull(f.cap); riga.citta = vuotoNull(f.citta)
@@ -943,9 +1101,15 @@ var CM = (function () {
           : { tipo: 'ok', html: '<span class="numero-grande">Commessa ' + esc(salvata.numero_commessa || '(numero non ricevuto)') + '</span> creata.' +
               (salvata.numero_commessa ? '' : ' Il database non ha restituito il numero: ricarica la pagina e controlla.') }
       } else {
-        // Mai: stato (è dell'App Cantieri), tipo, numero_commessa.
+        // Mai: stato (la colonna vecchia), tipo, numero_commessa. Lo stato della commessa: prima, e da solo (con ANAG_12
+        // passa dalla funzione, che scrive anche lo storico); poi il resto. Se lo stato non va, non si salva niente.
+        if (statoCambiato(orig)) {
+          var dopoStato = await scriviStato(orig, statoX)
+          statoFatto = true
+          ST.cantieri = ST.cantieri.map(function (c) { return c.id === dopoStato.id ? dopoStato : c })
+        }
         var campi = {
-          stato_commessa: f.stato_commessa || null, cliente_id: f.cliente_id || null,
+          cliente_id: f.cliente_id || null,
           luogo: vuotoNull(f.luogo), via: vuotoNull(f.via), cap: vuotoNull(f.cap), citta: vuotoNull(f.citta),
           paese: f.paese || AC.PAESE_PREDEFINITO, note: vuotoNull(f.note)
         }
@@ -965,13 +1129,16 @@ var CM = (function () {
     } catch (e) {
       bottone.disabled = false
       if (e.sessioneAssente) return APP.sessioneScaduta()
-      el('cm-avvisi-salva').innerHTML = AC.avviso('err', '<strong>NON salvato.</strong> ' + esc(spiega(e)))
+      el('cm-avvisi-salva').innerHTML = AC.avviso('err', statoFatto
+        ? '<strong>Stato salvato, il resto NON salvato.</strong> ' + esc(spiega(e)) + ' Premi di nuovo «Salva».'
+        : '<strong>NON salvato.</strong> ' + esc(spiega(e)))
       el('cm-avvisi-salva').scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
   }
   function vuotoNull(s) { s = String(s == null ? '' : s).trim(); return s || null }
   function spiega(e) {
-    var m = String(e && e.message || e)
+    var m = String(e && e.message || e).replace(/^anag_commessa_cambia_stato: /, '')
+    if (/solo il titolare e il responsabile/i.test(m)) return m
     if (/anag_cantieri_numero_uq|duplicate key/i.test(m)) return 'Questo numero commessa esiste già. Ricarica la pagina e riprova.'
     if (/row-level security|violates row-level|permission denied/i.test(m)) return 'il database non ti dà il permesso. Esci, rientra e riprova; se resta così, chiedi al titolare.'
     if (/check constraint/i.test(m)) return 'un valore non è accettato dal database (' + m + ').'

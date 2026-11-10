@@ -190,6 +190,9 @@ body.con-dettaglio .pane-dettaglio { display: block; }
 .st-incorso  { background: var(--ok-bg); color: var(--ok); }
 .st-persa    { background: var(--err-bg); color: var(--err); }
 .st-conclusa { background: #ede9fe; color: #5b21b6; }
+/* 11.5 (ANAG_12): i due stati nuovi */
+.st-rimandata  { background: #fff4e0; color: #8a4b00; border-color: #f0c98a; }
+.st-dainiziare { background: #e3f4f1; color: #0b5c52; border-color: #9fd8cd; }
 .st-senza    { background: transparent; color: var(--text3); border-color: var(--border2); }
 .st-interno  { background: var(--warn-bg); color: var(--warn); }
 /* 11.3: nei filtri lo stato ha icona, parola E un pallino del suo colore */
@@ -200,7 +203,13 @@ body.con-dettaglio .pane-dettaglio { display: block; }
 @media (prefers-color-scheme: dark) {
   .st-dafare { background: #263241; color: #cbd5e1; border-color: #3b4c60; }
   .st-conclusa { background: #2e2350; color: #c4b5fd; }
+  .st-rimandata { background: #3a2a10; color: #fcd9a0; border-color: #6b4a1a; }
+  .st-dainiziare { background: #12332f; color: #99e6dc; border-color: #2b5e57; }
 }
+/* 11.5: stato con nota, richiamo e periodo nella scheda e nel modulo */
+.stato-extra { margin-top: 8px; }
+.riga-stato-extra { display: block; font-size: 15px; color: var(--text2); }
+.richiamo-passato { color: var(--err); font-weight: 700; }
 
 /* ── Scheda ───────────────────────────────────────────────────────────────── */
 .testata-dettaglio { margin-bottom: 14px; }
